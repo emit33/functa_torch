@@ -40,6 +40,7 @@ class TrainingConfig:
 class PathConfig:
     project_root: Path = PROJECT_ROOT
     data_dir: Path = PROJECT_ROOT / "triangles"
+    checkpoint_dir: Path = PROJECT_ROOT / "checkpoints"
 
 
 @dataclass
