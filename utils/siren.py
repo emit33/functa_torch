@@ -6,6 +6,8 @@ import torch.nn.functional as F
 from torch import Tensor
 import numpy as np
 
+from utils.helpers import get_coordinate_grid
+
 
 class Sine(nn.Module):
     """Applies a scaled sine transform to input: out = sin(w0 * in)."""
@@ -329,7 +331,7 @@ class LatentModulatedSiren(nn.Module):
         self,
         width: int = 256,
         depth: int = 5,
-        dim_in: int = 3,
+        dim_in: int = 2,
         dim_out: int = 3,
         latent_dim: int = 64,
         layer_sizes: Tuple[int, ...] = (256, 512),
@@ -338,6 +340,7 @@ class LatentModulatedSiren(nn.Module):
         modulate_shift: bool = True,
         latent_init_scale: float = 0.01,
         use_meta_sgd: bool = False,
+        device: torch.device = torch.device("gpu"),
     ):
         """Constructor.
 
@@ -372,17 +375,13 @@ class LatentModulatedSiren(nn.Module):
         self.modulate_shift = modulate_shift
         self.latent_init_scale = latent_init_scale
         self.use_meta_sgd = use_meta_sgd
+        self.device = device
 
         if self.use_meta_sgd:
             raise NotImplementedError("Meta SGD not yet implemented")
 
         # Initialise Sine activations
         self.sinew0 = Sine(w0)
-
-        # Initialize latent vector and map from latents to modulations
-        latent_vector = torch.empty(latent_dim)
-        latent_vector.uniform_(-latent_init_scale, latent_init_scale)
-        self.latent_vector = nn.Parameter(latent_vector)
 
         self.latent_to_modulation = LatentToModulation(
             latent_dim=latent_dim,
@@ -455,9 +454,9 @@ class LatentModulatedSiren(nn.Module):
         Modulated vector.
         """
         if "scale" in modulations:
-            x = modulations["scale"] * x
+            x = modulations["scale"].unsqueeze(1) * x
         if "shift" in modulations:
-            x = x + modulations["shift"]
+            x = x + modulations["shift"].unsqueeze(1)
         return x
 
     def forward(self, coords: Tensor, latent_vector) -> Tensor:
@@ -476,7 +475,7 @@ class LatentModulatedSiren(nn.Module):
         ), f"Expected {self.dim_in} coordinate dimensions, got {coords.shape[-1]}"
 
         # Compute modulations from latent vector
-        modulations = self.latent_to_modulation(self.latent_vector)
+        modulations = self.latent_to_modulation(latent_vector)
 
         # Flatten coordinates
         x = torch.reshape(coords, (-1, coords.shape[-1]))
@@ -490,3 +489,12 @@ class LatentModulatedSiren(nn.Module):
         out = self.layers[-1](x)
 
         return torch.reshape(out, list(coords.shape[:-1]) + [self.dim_out])
+
+    def reconstruct_image(self, resolution, latent_vector):
+        sampling_grid = get_coordinate_grid(
+            resolution, device=self.device
+        )  # HxWxDim_in
+        x_in = torch.flatten(sampling_grid)  # HWxDim_in
+        x_out = self.forward(x_in, latent_vector)  # HWxDim_out
+        x_out = torch.reshape(x_out, list(sampling_grid.shape[:-1]) + [self.dim_out])
+        return x_out
