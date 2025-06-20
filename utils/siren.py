@@ -1,5 +1,6 @@
 from ctypes import Array
 from typing import Callable, Dict, Tuple
+import einops
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -237,7 +238,7 @@ class LatentToModulation(nn.Module):
         num_modulation_layers: int,
         modulate_scale: bool = True,
         modulate_shift: bool = True,
-        activation: Callable[[Tensor], Tensor] = F.relu,
+        activation: Callable[[Tensor], Tensor] = nn.ReLU(),
     ):
         """Constructor.
 
@@ -340,7 +341,7 @@ class LatentModulatedSiren(nn.Module):
         modulate_shift: bool = True,
         latent_init_scale: float = 0.01,
         use_meta_sgd: bool = False,
-        device: torch.device = torch.device("gpu"),
+        device: torch.device = torch.device("cuda"),
     ):
         """Constructor.
 
@@ -375,7 +376,6 @@ class LatentModulatedSiren(nn.Module):
         self.modulate_shift = modulate_shift
         self.latent_init_scale = latent_init_scale
         self.use_meta_sgd = use_meta_sgd
-        self.device = device
 
         if self.use_meta_sgd:
             raise NotImplementedError("Meta SGD not yet implemented")
@@ -454,9 +454,9 @@ class LatentModulatedSiren(nn.Module):
         Modulated vector.
         """
         if "scale" in modulations:
-            x = modulations["scale"].unsqueeze(1) * x
+            x = modulations["scale"] * x
         if "shift" in modulations:
-            x = x + modulations["shift"].unsqueeze(1)
+            x = x + modulations["shift"]
         return x
 
     def forward(self, coords: Tensor, latent_vector) -> Tensor:
@@ -490,11 +490,9 @@ class LatentModulatedSiren(nn.Module):
 
         return torch.reshape(out, list(coords.shape[:-1]) + [self.dim_out])
 
-    def reconstruct_image(self, resolution, latent_vector):
-        sampling_grid = get_coordinate_grid(
-            resolution, device=self.device
-        )  # HxWxDim_in
-        x_in = torch.flatten(sampling_grid)  # HWxDim_in
+    def reconstruct_image(self, sampling_grid, latent_vector):
+
+        x_in = einops.rearrange(sampling_grid, "h w c -> (h w) c")  # HWxDim_in
         x_out = self.forward(x_in, latent_vector)  # HWxDim_out
         x_out = torch.reshape(x_out, list(sampling_grid.shape[:-1]) + [self.dim_out])
         return x_out

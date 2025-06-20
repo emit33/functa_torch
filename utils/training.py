@@ -1,11 +1,12 @@
+import os
 from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from types import SimpleNamespace
 
-from helpers import initialise_latent_vector
-from data_handling import get_train_dataloader
+from utils.helpers import get_coordinate_grid, initialise_latent_vector
+from utils.data_handling import get_train_dataloader
 from utils.config import ModelConfig, PathConfig, TrainingConfig
 from utils.siren import LatentModulatedSiren
 
@@ -35,6 +36,7 @@ class latentModulatedTrainer(nn.Module):
         training_config: TrainingConfig,
         paths_config: PathConfig,
     ):
+        super().__init__()
         self.model: LatentModulatedSiren = LatentModulatedSiren(
             model_config.width,
             model_config.depth,
@@ -45,7 +47,6 @@ class latentModulatedTrainer(nn.Module):
             model_config.w0,
             model_config.modulate_scale,
             model_config.modulate_shift,
-            device=model_config.device,
         )
         # Paths
         self.checkpoint_dir: Path = paths_config.checkpoint_dir
@@ -64,13 +65,21 @@ class latentModulatedTrainer(nn.Module):
         self.device: torch.device = model_config.device
 
         # Obtain train loader
-        self.trainloader = get_train_dataloader(paths_config.data_dir)
+        grayscale_flag = model_config.dim_out == 1
+        self.trainloader = get_train_dataloader(
+            paths_config.data_dir, grayscale=grayscale_flag
+        )
 
         # Initialise training functions
         self.loss: image_loss = image_loss(self.l2_weight)
         self.outer_optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.outer_lr
         )
+
+        # Initialise sampling grid as a buffer so that it gets moved to the correct device
+        grid = get_coordinate_grid(self.resolution)
+        self.register_buffer("sampling_grid", grid)
+        self.sampling_grid: torch.Tensor
 
     def inner_loop(self, gt):
         latent_vector = initialise_latent_vector(
@@ -85,7 +94,8 @@ class latentModulatedTrainer(nn.Module):
         for _ in range(self.inner_steps):
             optimizer.zero_grad()
             # Obtain reconstructed image
-            im_out = self.model.reconstruct_image(self.resolution, latent_vector)
+            sampling_grid = self.sampling_grid.clone()  # Create copy for this iteration
+            im_out = self.model.reconstruct_image(sampling_grid, latent_vector)
 
             # Calculate loss
             loss = self.loss(im_out, gt, self.model.parameters())
@@ -103,18 +113,23 @@ class latentModulatedTrainer(nn.Module):
             latent_vectors = {}
 
             for batch in self.trainloader:
+                # Load batch
                 images, paths = batch
+                images = images.to(self.device)
+
+                # Zero gradients
                 self.outer_optimizer.zero_grad()
 
                 # Find appropriate latent vectors for these batch elements using N_inner optimizer steps.
                 optimized_latent = self.inner_loop(images)  # bs x latent_dim
 
                 # Compute loss wrt optimized latent vector
+                sampling_grid = self.sampling_grid.clone()
                 final_reconstruction = self.model.reconstruct_image(
-                    self.resolution, optimized_latent
+                    sampling_grid, optimized_latent
                 )
                 outer_loss = self.loss(
-                    final_reconstruction, batch, self.model.parameters()
+                    final_reconstruction, images, self.model.parameters()
                 )
 
                 # Update model parameters (not latent vector)
@@ -122,7 +137,8 @@ class latentModulatedTrainer(nn.Module):
                 self.outer_optimizer.step()
 
                 # Accumulate loss for this epoch
-                epoch_loss += outer_loss.item() * batch.shape[0]
+                batch_size = len(paths)
+                epoch_loss += outer_loss.item() * batch_size
 
                 # Store latent vectors
                 latent_vectors.update(
@@ -133,7 +149,8 @@ class latentModulatedTrainer(nn.Module):
                 )
 
             # Save model and latent vectors if new best epoch found
-            if epoch % 10 == 0 or epoch == self.n_epochs - 1:
+            if epoch % 5 == 0 or epoch == self.n_epochs - 1:
+                os.makedirs(self.checkpoint_dir, exist_ok=True)
                 torch.save(
                     {
                         "epoch": epoch,

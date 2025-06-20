@@ -29,13 +29,19 @@ class ImageDatasetWithPaths(Dataset):
         return image, str(img_path)  # Return both image and path
 
 
-def get_train_dataloader(data_dir: Path, batch_size: int = 32, resolution: int = 256):
-    transform = transforms.Compose(
-        [
-            transforms.Resize((resolution, resolution)),
-            transforms.ToTensor(),
-        ]
-    )
+def get_train_dataloader(
+    data_dir: Path, batch_size: int = 32, resolution: int = 256, grayscale=False
+):
+    transform_list = []
+    if grayscale:
+        transform_list.append(transforms.Grayscale())
+
+    transform_list += [
+        transforms.Resize((resolution, resolution)),
+        transforms.ToTensor(),
+    ]
+
+    transform = transforms.Compose(transform_list)
 
     dataset = ImageDatasetWithPaths(data_dir, transform=transform)
 

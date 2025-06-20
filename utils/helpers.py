@@ -1,10 +1,11 @@
+import os
+import sys
 import torch
 from torch import Tensor
+import torch.nn as nn
 
 
-def get_coordinate_grid(
-    res: int, centered: bool = True, device: torch.device = torch.device("gpu")
-) -> Tensor:
+def get_coordinate_grid(res: int, centered: bool = True) -> Tensor:
     """Returns a normalized coordinate grid for a res by res sized image.
 
     Args:
@@ -27,7 +28,7 @@ def get_coordinate_grid(
         coords_one_dim = torch.linspace(0, 1, res)
     # tensor will have shape (height, width, 2)
     y_coords, x_coords = torch.meshgrid(coords_one_dim, coords_one_dim, indexing="ij")
-    return torch.stack([y_coords, x_coords], dim=-1).to(device)
+    return torch.stack([y_coords, x_coords], dim=-1)
 
 
 def partition_params(model):
@@ -52,8 +53,27 @@ def partition_params(model):
 
 
 def initialise_latent_vector(latent_dim, latent_init_scale, device):
-    # Initialize latent vector and map from latents to modulations
-    latent_vector = torch.empty(latent_dim, requires_grad=True)
-    latent_vector.uniform_(-latent_init_scale, latent_init_scale)
+    # Initialize latent vector and map from latents to modulations.
+    latent_vector = torch.rand(latent_dim, device=device)  # Uniform[0, 1]
 
-    return latent_vector.to(device)
+    # Rescale to [-latent_init_scale, latent_init_scale]
+    latent_vector = 2 * latent_init_scale * latent_vector - latent_init_scale
+
+    latent_vector = nn.Parameter(latent_vector)
+
+    return latent_vector
+
+
+def check_for_checkpoints(checkpoint_dir):
+    if os.path.exists(checkpoint_dir):
+        while True:
+            resp = input(
+                f"Checkpoint directory {checkpoint_dir} already exists. Proceed? [y/n]: "
+            )
+            resp = resp.strip().lower()
+            if resp == "y":
+                break
+            if resp == "no":
+                print("Aborting.")
+                sys.exit(0)
+            print("Please enter 'y' or 'n'.")

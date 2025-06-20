@@ -20,7 +20,7 @@ class ModelConfig:
     w0: float = 1.0
     modulate_scale: bool = True
     modulate_shift: bool = True
-    device: torch.device = torch.device("gpu")
+    device: torch.device = torch.device("cuda")
 
 
 @dataclass
@@ -62,6 +62,7 @@ class Config:
             type_hooks={
                 Path: lambda x: PROJECT_ROOT / x if isinstance(x, str) else x,
                 Tuple[int, ...]: lambda x: tuple(x) if isinstance(x, list) else x,
+                torch.device: lambda s: torch.device(s) if isinstance(s, str) else s,
             }
         )
 
