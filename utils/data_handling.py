@@ -39,6 +39,7 @@ def get_train_dataloader(
     transform_list += [
         transforms.Resize((resolution, resolution)),
         transforms.ToTensor(),
+        transforms.Lambda(lambda t: t.permute(1, 2, 0)),  # change from CHW to HWC
     ]
 
     transform = transforms.Compose(transform_list)

@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from types import SimpleNamespace
+from dataclasses import asdict
 
 from utils.helpers import get_coordinate_grid, initialise_latent_vector
 from utils.data_handling import get_train_dataloader
@@ -63,6 +63,7 @@ class latentModulatedTrainer(nn.Module):
 
         # Further states
         self.device: torch.device = model_config.device
+        self.model_config = model_config
 
         # Obtain train loader
         grayscale_flag = model_config.dim_out == 1
@@ -115,36 +116,46 @@ class latentModulatedTrainer(nn.Module):
             for batch in self.trainloader:
                 # Load batch
                 images, paths = batch
-                images = images.to(self.device)
+                images = images.to(self.device)  # [bs,C,H,W]
+                batch_size = len(paths)
 
                 # Zero gradients
                 self.outer_optimizer.zero_grad()
 
                 # Find appropriate latent vectors for these batch elements using N_inner optimizer steps.
-                optimized_latent = self.inner_loop(images)  # bs x latent_dim
+                optimized_latents = []
+                final_reconstructions = []
+                outer_loss = torch.tensor(0.0, device=self.device)
+                for image in images:
 
-                # Compute loss wrt optimized latent vector
-                sampling_grid = self.sampling_grid.clone()
-                final_reconstruction = self.model.reconstruct_image(
-                    sampling_grid, optimized_latent
-                )
-                outer_loss = self.loss(
-                    final_reconstruction, images, self.model.parameters()
-                )
+                    optimized_latent = self.inner_loop(image)  # bs x latent_dim
+                    optimized_latents.append(optimized_latent)
+
+                    # Compute loss wrt optimized latent vector
+                    final_reconstruction = self.model.reconstruct_image(
+                        self.sampling_grid.clone(), optimized_latent
+                    )
+                    final_reconstructions.append(final_reconstruction)
+
+                    # Add loss for the final image to outer loss
+                    outer_loss += (
+                        self.loss(final_reconstruction, image, self.model.parameters())
+                        / batch_size
+                    )
 
                 # Update model parameters (not latent vector)
                 outer_loss.backward()
                 self.outer_optimizer.step()
 
                 # Accumulate loss for this epoch
-                batch_size = len(paths)
+
                 epoch_loss += outer_loss.item() * batch_size
 
                 # Store latent vectors
                 latent_vectors.update(
                     {
-                        img_path: latent
-                        for img_path, latent in zip(paths, optimized_latent)
+                        img_path: latent.detach().cpu()
+                        for img_path, latent in zip(paths, optimized_latents)
                     }
                 )
 
@@ -156,6 +167,7 @@ class latentModulatedTrainer(nn.Module):
                         "epoch": epoch,
                         "model_state_dict": self.model.state_dict(),
                         "latent_vectors": latent_vectors,
+                        "config": asdict(self.model_config),
                         "optimizer_state_dict": self.outer_optimizer.state_dict(),
                     },
                     self.checkpoint_dir / f"checkpoint_epoch_{epoch}.pth",

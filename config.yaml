@@ -23,4 +23,4 @@ training:
 
 paths:
   data_dir: "/home/tempus/projects/functa_torch/triangles"
-  checkpoints_dir: "/home/tempus/projects/functa_torch/checkpoints"
+  checkpoints_dir: "/home/tempus/projects/functa_torch/checkpoints_testing"

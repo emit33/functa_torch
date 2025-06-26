@@ -9,9 +9,10 @@ if __name__ == "__main__":
     # Obtain config
     config = Config.from_yaml()
 
-    check_for_checkpoints(config.paths.checkpoint_dir)
+    # check_for_checkpoints(config.paths.checkpoint_dir)
 
     trainer = latentModulatedTrainer(config.model, config.training, config.paths).to(
         config.model.device
     )
+
     trainer.train()
