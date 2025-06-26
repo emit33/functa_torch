@@ -4,9 +4,9 @@ model:
   depth: 5
   dim_in: 2
   dim_out: 1
-  latent_dim: 64
-  layer_sizes: [256, 512]
-  w0: 1.0
+  latent_dim: 16
+  layer_sizes: [32, 64]
+  w0: 30.0
   modulate_scale: true
   modulate_shift: true
   device: "cuda"  # Use "cuda" for GPU or "cpu" for CPU
@@ -14,12 +14,13 @@ model:
 training:
   latent_init_scale: 0.01
   outer_lr: 0.0001
-  inner_lr: 0.001
+  inner_lr: 0.0001
   l2_weight: 0.000001
   inner_steps: 10
   resolution: 256
   batch_size: 32
-  n_epochs: 10
+  n_epochs: 200
+  save_ckpt_step: 50
 
 paths:
   data_dir: "/home/tempus/projects/functa_torch/triangles"

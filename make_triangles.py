@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,9 +33,12 @@ def make_triangle(orientation=0.0, path=None):
 
 
 def make_triangles(dir, n=10):
-    os.makedirs(dir, exist_ok=True)
+    if os.path.exists(dir):
+        shutil.rmtree(dir)
+
+    os.makedirs(dir)
     for i in range(n):
-        path = Path(dir) / f"triange{i}.png"
+        path = Path(dir) / f"triangle{i}.png"
         make_triangle(i * 2 * np.pi / n, path)
 
 

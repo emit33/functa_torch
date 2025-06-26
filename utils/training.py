@@ -52,7 +52,7 @@ class latentModulatedTrainer(nn.Module):
         self.checkpoint_dir: Path = paths_config.checkpoint_dir
 
         # Training hparams
-        self.latent_dim: int = training_config.latent_dim
+        self.latent_dim: int = model_config.latent_dim
         self.latent_init_scale: float = training_config.latent_init_scale
         self.outer_lr: float = training_config.outer_lr
         self.inner_lr: float = training_config.inner_lr
@@ -60,6 +60,7 @@ class latentModulatedTrainer(nn.Module):
         self.inner_steps: int = training_config.inner_steps
         self.resolution: int = training_config.resolution
         self.n_epochs: int = training_config.n_epochs
+        self.save_ckpt_step: int = training_config.save_ckpt_step
 
         # Further states
         self.device: torch.device = model_config.device
@@ -160,7 +161,11 @@ class latentModulatedTrainer(nn.Module):
                 )
 
             # Save model and latent vectors if new best epoch found
-            if epoch % 5 == 0 or epoch == self.n_epochs - 1:
+            if (
+                epoch != 0
+                and epoch % self.save_ckpt_step == 0
+                or epoch == self.n_epochs - 1
+            ):
                 os.makedirs(self.checkpoint_dir, exist_ok=True)
                 torch.save(
                     {

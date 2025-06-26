@@ -26,7 +26,6 @@ class ModelConfig:
 @dataclass
 class TrainingConfig:
     latent_init_scale: float = 0.01
-    latent_dim: int = 64
     outer_lr: float = 1e-4
     inner_lr: float = 1e-3
     l2_weight: float = 1e-6
@@ -34,6 +33,7 @@ class TrainingConfig:
     resolution: int = 256
     batch_size: int = 32
     n_epochs: int = 100
+    save_ckpt_step: int = 10
 
 
 @dataclass
