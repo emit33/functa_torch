@@ -197,3 +197,4 @@ cython_debug/
 # Further ignroes
 testing.*
 checkpoints/*
+triangles/*
