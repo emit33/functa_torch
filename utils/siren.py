@@ -1,5 +1,5 @@
 from ctypes import Array
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, Optional, Tuple
 import einops
 import torch
 import torch.nn as nn
@@ -233,7 +233,7 @@ class LatentToModulation(nn.Module):
     def __init__(
         self,
         latent_dim: int,
-        layer_sizes: Tuple[int, ...],
+        layer_sizes: Optional[Tuple[int, ...]],
         width: int,
         num_modulation_layers: int,
         modulate_scale: bool = True,
@@ -259,12 +259,13 @@ class LatentToModulation(nn.Module):
         assert modulate_scale or modulate_shift
 
         self.latent_dim = latent_dim
-        self.layer_sizes = tuple(layer_sizes)  # counteract XM that converts to list
+        self.layer_sizes = layer_sizes  # counteract XM that converts to list
         self.width = width
         self.num_modulation_layers = num_modulation_layers
         self.modulate_scale = modulate_scale
         self.modulate_shift = modulate_shift
-        self.activation = activation
+        if not layer_sizes is None:
+            self.activation = activation
 
         # MLP outputs all modulations. We apply modulations on every hidden unit
         # (i.e on width number of units) at every modulation layer.
@@ -278,6 +279,11 @@ class LatentToModulation(nn.Module):
 
     def _construct_layers(self):
         """Construct MLP layers from prescribed widths."""
+        # Handle case where layer_sizes is none: ie just have a linear layer
+        if self.layer_sizes is None:
+            return nn.Linear(self.latent_dim, self.output_size)
+
+        # Otherwise construct proper MLP
         all_sizes = (self.latent_dim,) + self.layer_sizes + (self.output_size,)
 
         layers = []
@@ -335,7 +341,7 @@ class LatentModulatedSiren(nn.Module):
         dim_in: int = 2,
         dim_out: int = 3,
         latent_dim: int = 64,
-        layer_sizes: Tuple[int, ...] = (256, 512),
+        layer_sizes: Optional[Tuple[int, ...]] = (256, 512),
         w0: float = 1.0,
         modulate_scale: bool = True,
         modulate_shift: bool = True,

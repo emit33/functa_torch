@@ -1,7 +1,7 @@
 # config.py
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 import yaml
 import torch
 from dacite import from_dict, Config as DaciteConfig
@@ -12,11 +12,11 @@ PROJECT_ROOT = Path(__file__).parent.parent
 @dataclass
 class ModelConfig:
     width: int = 256
-    depth: int = 5
+    depth: int = 10
     dim_in: int = 2
     dim_out: int = 3
     latent_dim: int = 64
-    layer_sizes: Tuple[int, ...] = (256, 512)
+    layer_sizes: Optional[Tuple[int, ...]] = None
     w0: float = 1.0
     modulate_scale: bool = True
     modulate_shift: bool = True
@@ -26,13 +26,13 @@ class ModelConfig:
 @dataclass
 class TrainingConfig:
     latent_init_scale: float = 0.01
-    outer_lr: float = 1e-4
-    inner_lr: float = 1e-3
+    outer_lr: float = 3e-6
+    inner_lr: float = 1e-2
     l2_weight: float = 1e-6
-    inner_steps: int = 10
+    inner_steps: int = 3
     resolution: int = 256
-    batch_size: int = 32
-    n_epochs: int = 100
+    batch_size: int = 16
+    n_epochs: int = 500
     save_ckpt_step: int = 10
 
 
