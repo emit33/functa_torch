@@ -7,7 +7,7 @@ from utils.training import latentModulatedTrainer
 
 if __name__ == "__main__":
     # Obtain config
-    config = Config.from_yaml()
+    config = Config.from_yaml("/home/tempus/projects/functa_torch/config_testing.yaml")
 
     # check_for_checkpoints(config.paths.checkpoint_dir)
     if os.path.exists(config.paths.checkpoints_dir):

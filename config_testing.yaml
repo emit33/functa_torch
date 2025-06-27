@@ -4,9 +4,9 @@ model:
   depth: 5 # Paper sweeps through {10, 15, 20}
   dim_in: 2
   dim_out: 1
-  latent_dim: 64 # Paper default: 64
+  latent_dim: 16 # Paper default: 64
   layer_sizes: null
-  w0: 30.0
+  w0: 30
   modulate_scale: false
   modulate_shift: true
   device: "cuda"  
@@ -19,9 +19,9 @@ training:
   inner_steps: 3 # Paper default: 3
   resolution: 256
   batch_size: 10 # Paper default: As many as fit onto the gpu when using max model size
-  n_epochs: 500 # Paper default: Depends on dataset, about 1e5 to 1e6
-  save_ckpt_step: 100
+  n_epochs: 1000 # Paper default: Depends on dataset, about 1e5 to 1e6
+  save_ckpt_step: 5 
 
 paths:
-  data_dir: "/home/tempus/projects/functa_torch/triangles"
+  data_dir: "/home/tempus/projects/functa_torch/data/triangles"
   checkpoints_dir: "/home/tempus/projects/functa_torch/checkpoints_testing"

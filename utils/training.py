@@ -1,9 +1,11 @@
 import os
 from pathlib import Path
+from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from dataclasses import asdict
+from tqdm import tqdm
 
 from utils.helpers import get_coordinate_grid, initialise_latent_vector
 from utils.data_handling import get_train_dataloader
@@ -50,6 +52,7 @@ class latentModulatedTrainer(nn.Module):
         )
         # Paths
         self.checkpoint_dir: Path = paths_config.checkpoints_dir
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
 
         # Training hparams
         self.latent_dim: int = model_config.latent_dim
@@ -60,7 +63,7 @@ class latentModulatedTrainer(nn.Module):
         self.inner_steps: int = training_config.inner_steps
         self.resolution: int = training_config.resolution
         self.n_epochs: int = training_config.n_epochs
-        self.save_ckpt_step: int = training_config.save_ckpt_step
+        self.save_ckpt_step: Optional[int] = training_config.save_ckpt_step
 
         # Further states
         self.device: torch.device = model_config.device
@@ -110,7 +113,10 @@ class latentModulatedTrainer(nn.Module):
 
     def train(self):
         n_train_images = len(self.trainloader.dataset)  # type: ignore
-        for epoch in range(self.n_epochs):
+        avg_losses = []
+
+        pbar = tqdm(range(self.n_epochs), desc="Epoch", ncols=80)
+        for epoch in pbar:
             epoch_loss = 0
             latent_vectors = {}
 
@@ -160,22 +166,26 @@ class latentModulatedTrainer(nn.Module):
                     }
                 )
 
+            # Store losses
+            avg_loss = epoch_loss / n_train_images
+            avg_losses.append(avg_loss)
+
             # Save model and latent vectors if new best epoch found
-            if (
-                epoch != 0
+            if epoch == self.n_epochs - 1 or (
+                self.save_ckpt_step is not None
+                and epoch != 0
                 and epoch % self.save_ckpt_step == 0
-                or epoch == self.n_epochs - 1
             ):
-                os.makedirs(self.checkpoint_dir, exist_ok=True)
+
                 torch.save(
                     {
                         "epoch": epoch,
                         "model_state_dict": self.model.state_dict(),
                         "latent_vectors": latent_vectors,
+                        "avg_losses": avg_losses,
                         "config": asdict(self.model_config),
                         "optimizer_state_dict": self.outer_optimizer.state_dict(),
                     },
                     self.checkpoint_dir / f"checkpoint_epoch_{epoch}.pth",
                 )
-
-            print(f"Epoch: {epoch}, avg_loss: {epoch_loss/n_train_images}")
+            pbar.set_postfix(avg_loss=f"{avg_loss:.4f}")

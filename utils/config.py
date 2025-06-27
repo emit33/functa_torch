@@ -33,7 +33,7 @@ class TrainingConfig:
     resolution: int = 256
     batch_size: int = 16
     n_epochs: int = 500
-    save_ckpt_step: int = 10
+    save_ckpt_step: Optional[int] = None
 
 
 @dataclass
@@ -64,6 +64,7 @@ class Config:
                 Tuple[int, ...]: lambda x: tuple(x) if isinstance(x, list) else x,
                 torch.device: lambda s: torch.device(s) if isinstance(s, str) else s,
                 float: lambda s: float(s) if isinstance(s, str) else s,
+                int: lambda s: int(s) if isinstance(s, str) else s,
             }
         )
 
