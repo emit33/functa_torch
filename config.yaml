@@ -1,25 +1,25 @@
 # config.yaml
 model:
-  width: 256
-  depth: 10
+  width: 256 # Paper sweeps through {256, 384, 512}
+  depth: 5 # Paper sweeps through {10, 15, 20}
   dim_in: 2
   dim_out: 1
-  latent_dim: 64
+  latent_dim: 64 # Paper default: 64
   layer_sizes: null
   w0: 30.0
   modulate_scale: false
   modulate_shift: true
-  device: "cuda"  # Use "cuda" for GPU or "cpu" for CPU
+  device: "cuda"  
 
 training:
   latent_init_scale: 0.01
-  outer_lr: 3e-6
-  inner_lr: 0.01
+  outer_lr: 1e-5 # Paper default: 3e-6; set to larger value for shorter training
+  inner_lr: 0.01 # Paper default: 1e-2; seems appropriate
   l2_weight: 0
-  inner_steps: 3
+  inner_steps: 3 # Paper default: 3
   resolution: 256
-  batch_size: 5
-  n_epochs: 500
+  batch_size: 10 # Paper default: As many as fit onto the gpu when using max model size
+  n_epochs: 500 # Paper default: Depends on dataset, about 1e5 to 1e6
   save_ckpt_step: 100
 
 paths:
