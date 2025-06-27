@@ -49,7 +49,7 @@ class latentModulatedTrainer(nn.Module):
             model_config.modulate_shift,
         )
         # Paths
-        self.checkpoint_dir: Path = paths_config.checkpoint_dir
+        self.checkpoint_dir: Path = paths_config.checkpoints_dir
 
         # Training hparams
         self.latent_dim: int = model_config.latent_dim

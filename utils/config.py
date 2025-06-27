@@ -40,7 +40,7 @@ class TrainingConfig:
 class PathConfig:
     project_root: Path = PROJECT_ROOT
     data_dir: Path = PROJECT_ROOT / "triangles"
-    checkpoint_dir: Path = PROJECT_ROOT / "checkpoints"
+    checkpoints_dir: Path = PROJECT_ROOT / "checkpoints"
 
 
 @dataclass
@@ -63,6 +63,7 @@ class Config:
                 Path: lambda x: PROJECT_ROOT / x if isinstance(x, str) else x,
                 Tuple[int, ...]: lambda x: tuple(x) if isinstance(x, list) else x,
                 torch.device: lambda s: torch.device(s) if isinstance(s, str) else s,
+                float: lambda s: float(s) if isinstance(s, str) else s,
             }
         )
 
