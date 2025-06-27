@@ -64,7 +64,7 @@ class Config:
                 Tuple[int, ...]: lambda x: tuple(x) if isinstance(x, list) else x,
                 torch.device: lambda s: torch.device(s) if isinstance(s, str) else s,
                 float: lambda s: float(s) if isinstance(s, str) else s,
-                int: lambda s: int(s) if isinstance(s, str) else s,
+                int: lambda x: int(float(x)) if isinstance(x, (str, float)) else x,
             }
         )
 
