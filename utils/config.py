@@ -6,8 +6,6 @@ import yaml
 import torch
 from dacite import from_dict, Config as DaciteConfig
 
-PROJECT_ROOT = Path(__file__).parent.parent
-
 
 @dataclass
 class ModelConfig:
@@ -33,14 +31,14 @@ class TrainingConfig:
     resolution: int = 256
     batch_size: int = 16
     n_epochs: int = 500
+    resolution: int = 256
     save_ckpt_step: Optional[int] = None
 
 
 @dataclass
 class PathConfig:
-    project_root: Path = PROJECT_ROOT
-    data_dir: Path = PROJECT_ROOT / "triangles"
-    checkpoints_dir: Path = PROJECT_ROOT / "checkpoints"
+    data_dir: Path
+    checkpoints_dir: Path
 
 
 @dataclass
@@ -50,17 +48,14 @@ class Config:
     paths: PathConfig
 
     @classmethod
-    def from_yaml(cls, yaml_path=None):
-        if yaml_path is None:
-            yaml_path = PROJECT_ROOT / "config.yaml"
-
+    def from_yaml(cls, yaml_path):
         with open(yaml_path, "r") as f:
             config_dict = yaml.safe_load(f)
 
         # Configure dacite for type conversions
         dacite_config = DaciteConfig(
             type_hooks={
-                Path: lambda x: PROJECT_ROOT / x if isinstance(x, str) else x,
+                Path: lambda x: Path(x) if isinstance(x, str) else x,
                 Tuple[int, ...]: lambda x: tuple(x) if isinstance(x, list) else x,
                 torch.device: lambda s: torch.device(s) if isinstance(s, str) else s,
                 float: lambda s: float(s) if isinstance(s, str) else s,

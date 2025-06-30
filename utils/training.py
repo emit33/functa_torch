@@ -62,7 +62,9 @@ class latentModulatedTrainer(nn.Module):
         self.l2_weight: float = training_config.l2_weight
         self.inner_steps: int = training_config.inner_steps
         self.resolution: int = training_config.resolution
+        self.batch_size: int = training_config.batch_size
         self.n_epochs: int = training_config.n_epochs
+        self.resolution: int = training_config.resolution
         self.save_ckpt_step: Optional[int] = training_config.save_ckpt_step
 
         # Further states
@@ -72,7 +74,10 @@ class latentModulatedTrainer(nn.Module):
         # Obtain train loader
         grayscale_flag = model_config.dim_out == 1
         self.trainloader = get_train_dataloader(
-            paths_config.data_dir, grayscale=grayscale_flag
+            paths_config.data_dir,
+            self.batch_size,
+            self.resolution,
+            grayscale=grayscale_flag,
         )
 
         # Initialise training functions
