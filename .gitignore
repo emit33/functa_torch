@@ -200,3 +200,5 @@ checkpoints/*
 triangles/*
 checkpoints*
 data
+experiments*
+slurm_logs
