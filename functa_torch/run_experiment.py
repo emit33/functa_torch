@@ -1,14 +1,14 @@
 import os
 import shutil
-from utils.config import Config
-from utils.helpers import check_for_checkpoints
-from utils.training import latentModulatedTrainer
+from functa_torch.utils.config import Config
+from functa_torch.utils.helpers import check_for_checkpoints
+from functa_torch.utils.training import latentModulatedTrainer
 
 
-if __name__ == "__main__":
+def main():
     # Obtain config
     config = Config.from_yaml(
-        "/home/tempus/projects/functa_sirens_analysis/config_testing.yaml"
+        "/home/tempus/projects/siren_analysis/functa_experiments/01_10_triangles_latent_64/config.yaml"
     )
 
     # check_for_checkpoints(config.paths.checkpoint_dir)
@@ -20,3 +20,7 @@ if __name__ == "__main__":
     )
 
     trainer.train()
+
+
+if __name__ == "__main__":
+    main()

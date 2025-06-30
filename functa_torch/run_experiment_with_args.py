@@ -3,12 +3,12 @@ import shutil
 import argparse
 
 import yaml
-from utils.config import Config
-from utils.helpers import check_for_checkpoints
-from utils.training import latentModulatedTrainer
+from functa_torch.utils.config import Config
+from functa_torch.utils.helpers import check_for_checkpoints
+from functa_torch.utils.training import latentModulatedTrainer
 
 
-if __name__ == "__main__":
+def main():
     # Obtain config path
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -33,3 +33,7 @@ if __name__ == "__main__":
     )
 
     trainer.train()
+
+
+if __name__ == "__main__":
+    main()

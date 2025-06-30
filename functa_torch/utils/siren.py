@@ -7,8 +7,6 @@ import torch.nn.functional as F
 from torch import Tensor
 import numpy as np
 
-from utils.helpers import get_coordinate_grid
-
 
 class Sine(nn.Module):
     """Applies a scaled sine transform to input: out = sin(w0 * in)."""

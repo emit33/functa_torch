@@ -7,10 +7,10 @@ import torch.nn.functional as F
 from dataclasses import asdict
 from tqdm import tqdm
 
-from utils.helpers import get_coordinate_grid, initialise_latent_vector
-from utils.data_handling import get_train_dataloader
-from utils.config import ModelConfig, PathConfig, TrainingConfig
-from utils.siren import LatentModulatedSiren
+from functa_torch.utils.helpers import get_coordinate_grid, initialise_latent_vector
+from functa_torch.utils.data_handling import get_train_dataloader
+from functa_torch.utils.config import ModelConfig, PathConfig, TrainingConfig
+from functa_torch.utils.siren import LatentModulatedSiren
 
 
 class image_loss(nn.Module):
