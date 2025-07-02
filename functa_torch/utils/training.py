@@ -49,6 +49,7 @@ class latentModulatedTrainer(nn.Module):
             model_config.w0,
             model_config.modulate_scale,
             model_config.modulate_shift,
+            model_config.final_activation,
         )
         # Paths
         self.checkpoint_dir: Path = paths_config.checkpoints_dir
@@ -78,6 +79,7 @@ class latentModulatedTrainer(nn.Module):
             self.batch_size,
             self.resolution,
             grayscale=grayscale_flag,
+            tensor_data=training_config.tensor_data,
         )
 
         # Initialise training functions

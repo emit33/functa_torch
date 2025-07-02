@@ -1,5 +1,5 @@
 from ctypes import Array
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Literal, Optional, Tuple
 import einops
 import torch
 import torch.nn as nn
@@ -343,9 +343,10 @@ class LatentModulatedSiren(nn.Module):
         w0: float = 1.0,
         modulate_scale: bool = True,
         modulate_shift: bool = True,
+        final_activation: Optional[Literal["sigmoid"]] = None,
         latent_init_scale: float = 0.01,
         use_meta_sgd: bool = False,
-        device: torch.device = torch.device("cuda"),
+        device: Optional[torch.device] = None,
     ):
         """Constructor.
 
@@ -380,6 +381,16 @@ class LatentModulatedSiren(nn.Module):
         self.modulate_shift = modulate_shift
         self.latent_init_scale = latent_init_scale
         self.use_meta_sgd = use_meta_sgd
+
+        # Parse final activation
+        if final_activation is None:
+            self.final_activation = None
+        elif final_activation == "sigmoid":
+            self.final_activation = nn.Sigmoid()
+        else:
+            raise ValueError(
+                f"Incorrect final_activation string passed: {model_config.final_activation}"
+            )
 
         if self.use_meta_sgd:
             raise NotImplementedError("Meta SGD not yet implemented")
@@ -491,6 +502,9 @@ class LatentModulatedSiren(nn.Module):
             x = self.sinew0(x)
 
         out = self.layers[-1](x)
+
+        if self.final_activation is not None:
+            out = self.final_activation(out)
 
         return torch.reshape(out, list(coords.shape[:-1]) + [self.dim_out])
 

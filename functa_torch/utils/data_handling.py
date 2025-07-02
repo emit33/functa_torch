@@ -29,7 +29,21 @@ class ImageDatasetWithPaths(Dataset):
         return image, str(img_path)  # Return both image and path
 
 
-def get_train_dataloader(
+class TensorDataset_pair_output(Dataset):
+    def __init__(
+        self,
+        data_tensor: torch.Tensor,
+    ):
+        self.data_tensor = data_tensor
+
+    def __len__(self):
+        return len(self.data_tensor)
+
+    def __getitem__(self, idx):
+        return self.data_tensor[idx], f"img_{idx}"
+
+
+def get_img_dir_dataloader(
     data_dir: Path, batch_size: int = 32, resolution: int = 256, grayscale=False
 ):
     transform_list = []
@@ -55,3 +69,30 @@ def get_train_dataloader(
     )
 
     return dataloader
+
+
+def get_tensor_data_dataloader(data_dir: Path, batch_size: int = 32):
+    data_tensor = torch.load(data_dir / "imgs.pt")
+    dataset = TensorDataset_pair_output(data_tensor)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True if torch.cuda.is_available() else False,
+    )
+
+    return dataloader
+
+
+def get_train_dataloader(
+    data_dir: Path,
+    batch_size: int = 32,
+    resolution: int = 256,
+    grayscale=False,
+    tensor_data: bool = False,
+):
+    if tensor_data:
+        return get_tensor_data_dataloader(data_dir, batch_size)
+    else:
+        return get_img_dir_dataloader(data_dir, batch_size, resolution, grayscale)

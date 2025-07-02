@@ -1,7 +1,7 @@
 # config.py
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 import yaml
 import torch
 from dacite import from_dict, Config as DaciteConfig
@@ -18,13 +18,14 @@ class ModelConfig:
     w0: float = 1.0
     modulate_scale: bool = True
     modulate_shift: bool = True
+    final_activation: Optional[Literal["sigmoid"]] = None
     device: torch.device = torch.device("cuda")
 
 
 @dataclass
 class TrainingConfig:
     latent_init_scale: float = 0.01
-    outer_lr: float = 3e-6
+    outer_lr: float = 1e-5
     inner_lr: float = 1e-2
     l2_weight: float = 1e-6
     inner_steps: int = 3
@@ -33,6 +34,7 @@ class TrainingConfig:
     n_epochs: int = 500
     resolution: int = 256
     save_ckpt_step: Optional[int] = None
+    tensor_data: bool = False
 
 
 @dataclass
