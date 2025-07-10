@@ -9,7 +9,12 @@ from tqdm import tqdm
 
 from functa_torch.utils.helpers import get_coordinate_grid, initialise_latent_vector
 from functa_torch.utils.data_handling import get_train_dataloader
-from functa_torch.utils.config import ModelConfig, PathConfig, TrainingConfig
+from functa_torch.utils.config import (
+    ModelConfig,
+    OtherConfig,
+    PathConfig,
+    TrainingConfig,
+)
 from functa_torch.utils.siren import LatentModulatedSiren
 
 
@@ -37,6 +42,7 @@ class latentModulatedTrainer(nn.Module):
         model_config: ModelConfig,
         training_config: TrainingConfig,
         paths_config: PathConfig,
+        other_config: OtherConfig,
     ):
         super().__init__()
         self.model: LatentModulatedSiren = LatentModulatedSiren(
@@ -65,7 +71,7 @@ class latentModulatedTrainer(nn.Module):
         self.resolution: int = training_config.resolution
         self.batch_size: int = training_config.batch_size
         self.n_epochs: int = training_config.n_epochs
-        self.save_ckpt_step: Optional[int] = training_config.save_ckpt_step
+        self.save_ckpt_step: Optional[int] = other_config.save_ckpt_step
 
         # Further states
         self.device: torch.device = model_config.device
