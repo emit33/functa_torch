@@ -92,10 +92,7 @@ class latentModulatedTrainer(nn.Module):
         self.register_buffer("sampling_grid", grid)
         self.sampling_grid: torch.Tensor
 
-    def inner_loop(self, gt):
-        latent_vector = initialise_latent_vector(
-            self.latent_dim, self.latent_init_scale, self.device
-        )
+    def inner_loop(self, latent_vector, gt):
         # Inner optimizer should have no memory of its state, every time we do inner
         # loop optimization we are solving a new problem from scratch, so optimizer
         # should be reinitialized. As we only update modulations with opt_inner,
@@ -120,6 +117,9 @@ class latentModulatedTrainer(nn.Module):
     def train(self):
         n_train_images = len(self.trainloader.dataset)  # type: ignore
         avg_losses = []
+        proto_latent_vector = initialise_latent_vector(
+            self.latent_dim, self.latent_init_scale, self.device
+        )  # initialise latent vector once
 
         pbar = tqdm(range(self.n_epochs), desc="Epoch", ncols=80)
         for epoch in pbar:
@@ -141,7 +141,9 @@ class latentModulatedTrainer(nn.Module):
                 outer_loss = torch.tensor(0.0, device=self.device)
                 for image in images:
 
-                    optimized_latent = self.inner_loop(image)  # bs x latent_dim
+                    optimized_latent = self.inner_loop(
+                        nn.Parameter(proto_latent_vector.clone()), image
+                    )  # bs x latent_dim
                     optimized_latents.append(optimized_latent)
 
                     # Compute loss wrt optimized latent vector

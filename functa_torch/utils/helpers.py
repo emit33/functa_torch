@@ -59,8 +59,6 @@ def initialise_latent_vector(latent_dim, latent_init_scale, device):
     # Rescale to [-latent_init_scale, latent_init_scale]
     latent_vector = 2 * latent_init_scale * latent_vector - latent_init_scale
 
-    latent_vector = nn.Parameter(latent_vector)
-
     return latent_vector
 
 
