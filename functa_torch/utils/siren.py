@@ -389,7 +389,7 @@ class LatentModulatedSiren(nn.Module):
             self.final_activation = nn.Sigmoid()
         else:
             raise ValueError(
-                f"Incorrect final_activation string passed: {model_config.final_activation}"
+                f"Incorrect final_activation string passed: {final_activation}"
             )
 
         if self.use_meta_sgd:

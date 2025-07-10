@@ -201,5 +201,4 @@ triangles/*
 checkpoints*
 data
 experiments*
-slurm_logs
 *.egg-info/

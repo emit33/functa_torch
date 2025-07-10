@@ -65,7 +65,6 @@ class latentModulatedTrainer(nn.Module):
         self.resolution: int = training_config.resolution
         self.batch_size: int = training_config.batch_size
         self.n_epochs: int = training_config.n_epochs
-        self.resolution: int = training_config.resolution
         self.save_ckpt_step: Optional[int] = training_config.save_ckpt_step
 
         # Further states
@@ -153,7 +152,11 @@ class latentModulatedTrainer(nn.Module):
 
                     # Add loss for the final image to outer loss
                     outer_loss += (
-                        self.loss(final_reconstruction, image, self.model.parameters())
+                        self.loss(
+                            final_reconstruction.squeeze(),
+                            image.squeeze(),
+                            self.model.parameters(),
+                        )
                         / batch_size
                     )
 

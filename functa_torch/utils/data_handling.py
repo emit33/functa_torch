@@ -35,6 +35,10 @@ class TensorDataset_pair_output(Dataset):
         data_tensor: torch.Tensor,
     ):
         self.data_tensor = data_tensor
+        if self.data_tensor.max() > 1 or self.data_tensor.min() < 0:
+            self.data_tensor = (self.data_tensor - self.data_tensor.min()) / (
+                self.data_tensor.max() - self.data_tensor.min()
+            )
 
     def __len__(self):
         return len(self.data_tensor)
@@ -72,7 +76,7 @@ def get_img_dir_dataloader(
 
 
 def get_tensor_data_dataloader(data_dir: Path, batch_size: int = 32):
-    data_tensor = torch.load(data_dir / "imgs.pt")
+    data_tensor = torch.load(data_dir / "imgs.pt").float()
     dataset = TensorDataset_pair_output(data_tensor)
     dataloader = DataLoader(
         dataset,
