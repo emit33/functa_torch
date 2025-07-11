@@ -10,7 +10,7 @@ from functa_torch.utils.training import latentModulatedTrainer
 def main():
     # Obtain config
     config = Config.from_yaml(
-        "/home/tempus/projects/functa_experiments/11_many_inner_steps/config.yaml"
+        "/home/tempus/projects/functa_experiments/00_test_config/config.yaml"
     )
 
     if os.path.exists(config.paths.checkpoints_dir):
@@ -23,12 +23,14 @@ def main():
     trainer.train()
 
     # Create visualisations
-    if config.other.save_figs:
+    if config.paths.figs_dir is not None:
         visualise_reconstructions(
-            config.paths.checkpoints_dir, config.paths.experiment_dir / "imgs.png"
+            config.paths.checkpoints_dir,
+            config.paths.figs_dir / (config.experiment_name + "_imgs.png"),
         )
         visualise_loss(
-            config.paths.checkpoints_dir, config.paths.experiment_dir / "loss.png"
+            config.paths.checkpoints_dir,
+            config.paths.figs_dir / (config.experiment_name + "_loss.png"),
         )
 
 
