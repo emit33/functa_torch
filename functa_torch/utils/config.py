@@ -29,10 +29,8 @@ class TrainingConfig:
     inner_lr: float = 1e-2
     l2_weight: float = 1e-6
     inner_steps: int = 3
-    resolution: int = 256
     batch_size: int = 16
     n_epochs: int = 500
-    resolution: int = 256
     tensor_data: bool = True
 
 

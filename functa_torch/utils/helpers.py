@@ -5,7 +5,12 @@ from torch import Tensor
 import torch.nn as nn
 
 
-def get_coordinate_grid(res: int, centered: bool = True) -> Tensor:
+def get_coordinate_grid(
+    res: int,
+    centered: bool = True,
+    batch_size=None,
+    device: torch.device = torch.device("cuda"),
+) -> Tensor:
     """Returns a normalized coordinate grid for a res by res sized image.
 
     Args:
@@ -28,7 +33,12 @@ def get_coordinate_grid(res: int, centered: bool = True) -> Tensor:
         coords_one_dim = torch.linspace(0, 1, res)
     # tensor will have shape (height, width, 2)
     y_coords, x_coords = torch.meshgrid(coords_one_dim, coords_one_dim, indexing="ij")
-    return torch.stack([y_coords, x_coords], dim=-1)
+    grid = torch.stack([y_coords, x_coords], dim=-1)
+
+    if batch_size is not None:
+        grid = grid.unsqueeze(0).expand(batch_size, -1, -1, -1)
+
+    return grid.to(device)
 
 
 def partition_params(model):
@@ -52,14 +62,23 @@ def partition_params(model):
     return shared_params, image_specific_params
 
 
-def initialise_latent_vector(latent_dim, latent_init_scale, device):
+def initialise_latent_vector(
+    latent_dim,
+    latent_init_scale,
+    device,
+    batch_size=None,
+):
     # Initialize latent vector and map from latents to modulations.
     latent_vector = torch.rand(latent_dim, device=device)  # Uniform[0, 1]
 
     # Rescale to [-latent_init_scale, latent_init_scale]
     latent_vector = 2 * latent_init_scale * latent_vector - latent_init_scale
 
-    return latent_vector
+    # Expand along batch dimension if desired
+    if batch_size is not None:
+        latent_vector = latent_vector.unsqueeze(0).expand(batch_size, -1)
+
+    return nn.Parameter(latent_vector)
 
 
 def check_for_checkpoints(checkpoint_dir):

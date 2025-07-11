@@ -312,20 +312,20 @@ class LatentToModulation(nn.Module):
             if self.modulate_scale and self.modulate_shift:
                 start = 2 * self.width * i
                 single_layer_modulations["scale"] = (
-                    modulations[start : start + self.width] + 1
+                    modulations[..., start : start + self.width] + 1
                 )
                 single_layer_modulations["shift"] = modulations[
-                    start + self.width : start + 2 * self.width
+                    ..., start + self.width : start + 2 * self.width
                 ]
             elif self.modulate_scale:
                 start = self.width * i
                 single_layer_modulations["scale"] = (
-                    modulations[start : start + self.width] + 1
+                    modulations[..., start : start + self.width] + 1
                 )
             elif self.modulate_shift:
                 start = self.width * i
                 single_layer_modulations["shift"] = modulations[
-                    start : start + self.width
+                    ..., start : start + self.width
                 ]
             outputs[i] = single_layer_modulations
         return outputs
@@ -457,60 +457,100 @@ class LatentModulatedSiren(nn.Module):
 
         return nn.ModuleList(layers)
 
-    def modulate(self, x: Tensor, modulations: Dict[str, Tensor]) -> Tensor:
-        """Modulates input according to modulations.
+    # def modulate(self, x: Tensor, modulations: Dict[str, Tensor]) -> Tensor:
+    #     """Modulates input according to modulations.
 
-        Args:
-        x: Hidden features of MLP.
-        modulations: Dict with keys 'scale' and 'shift' (or only one of them)
-            containing modulations.
+    #     Args:
+    #     x: Hidden features of MLP.
+    #     modulations: Dict with keys 'scale' and 'shift' (or only one of them)
+    #         containing modulations.
 
-        Returns:
-        Modulated vector.
-        """
-        if "scale" in modulations:
-            x = modulations["scale"] * x
-        if "shift" in modulations:
-            x = x + modulations["shift"]
-        return x
+    #     Returns:
+    #     Modulated vector.
+    #     """
+    #     if "scale" in modulations:
+    #         x = modulations["scale"] * x
+    #     if "shift" in modulations:
+    #         x = x + modulations["shift"]
+    #     return x
 
-    def forward(self, coords: Tensor, latent_vector) -> Tensor:
-        """Evaluates model at a batch of coordinates.
+    # def forward(self, coords: Tensor, latent_vector) -> Tensor:
+    #     """Evaluates model at a batch of coordinates.
 
-        Args:
-        coords (Array): Array of coordinates. Should have shape (height, width, 2)
-            for images and (depth/time, height, width, 3) for 3D shapes/videos.
+    #     Args:
+    #     coords (Array): Array of coordinates. Should have shape (height, width, 2)
+    #         for images and (depth/time, height, width, 3) for 3D shapes/videos.
 
-        Returns:
-        Output features at coords.
-        """
-        # Check coordinate dimensions
-        assert (
-            coords.shape[-1] == self.dim_in
-        ), f"Expected {self.dim_in} coordinate dimensions, got {coords.shape[-1]}"
+    #     Returns:
+    #     Output features at coords.
+    #     """
+    #     # Check coordinate dimensions
+    #     assert (
+    #         coords.shape[-1] == self.dim_in
+    #     ), f"Expected {self.dim_in} coordinate dimensions, got {coords.shape[-1]}"
 
-        # Compute modulations from latent vector
-        modulations = self.latent_to_modulation(latent_vector)
+    #     # Compute modulations from latent vector
+    #     modulations = self.latent_to_modulation(latent_vector)
 
-        # Flatten coordinates
-        x = torch.reshape(coords, (-1, coords.shape[-1]))
+    #     # Flatten coordinates
+    #     x = torch.reshape(coords, (-1, coords.shape[-1]))
 
-        # Layers before final layer
+    #     # Layers before final layer
+    #     for i, layer in enumerate(self.layers[:-1]):
+    #         x = layer(x)
+    #         x = self.modulate(x, modulations[i])
+    #         x = self.sinew0(x)
+
+    #     out = self.layers[-1](x)
+
+    #     if self.final_activation is not None:
+    #         out = self.final_activation(out)
+
+    #     return torch.reshape(out, list(coords.shape[:-1]) + [self.dim_out])
+
+    def forward(
+        self, coords: Tensor, latent: Tensor  # [B, N_points, dim_in]  # [B, latent_dim]
+    ) -> Tensor:
+        B = coords.shape[0]
+
+        # Check correct dimensionality
+        assert latent.shape[0] == B
+        assert coords.shape[-1] == self.dim_in
+
+        # 1) compute all FiLM modulations: Dict[layer_idx] -> {"scale": [B, C], "shift": [B, C]}
+        mods = self.latent_to_modulation(latent)
+
+        # Pass through
+        x = coords
         for i, layer in enumerate(self.layers[:-1]):
             x = layer(x)
-            x = self.modulate(x, modulations[i])
+
+            m = mods[i]
+            if "scale" in m:
+                x = x * m["scale"].unsqueeze(1)  # [B,1,C] -> broadcast over N
+            if "shift" in m:
+                x = x + m["shift"].unsqueeze(1)
+
+            # sine activation
             x = self.sinew0(x)
 
-        out = self.layers[-1](x)
-
+        # 4) final linear (+ optional activation)
+        x = self.layers[-1](x)  # [B, N, dim_out]
         if self.final_activation is not None:
-            out = self.final_activation(out)
+            x = self.final_activation(x)
 
-        return torch.reshape(out, list(coords.shape[:-1]) + [self.dim_out])
+        return x
 
-    def reconstruct_image(self, sampling_grid, latent_vector):
+    # def reconstruct_image(self, sampling_grid, latent_vector):
 
-        x_in = einops.rearrange(sampling_grid, "h w c -> (h w) c")  # HWxDim_in
-        x_out = self.forward(x_in, latent_vector)  # HWxDim_out
-        x_out = torch.reshape(x_out, list(sampling_grid.shape[:-1]) + [self.dim_out])
+    #     x_in = einops.rearrange(sampling_grid, "h w c -> (h w) c")  # HWxDim_in
+    #     x_out = self.forward(x_in, latent_vector)  # HWxDim_out
+    #     x_out = torch.reshape(x_out, list(sampling_grid.shape[:-1]) + [self.dim_out])
+    #     return x_out
+
+    def reconstruct_image(self, sampling_grid, latent_vectors):
+        B, H, W, C = sampling_grid.shape
+        x_in = einops.rearrange(sampling_grid, "b h w c -> b (h w) c")  # HWxDim_in
+        x_out = self.forward(x_in, latent_vectors)  # HWxDim_out
+        x_out = torch.reshape(x_out, [B, H, W, self.dim_out])
         return x_out

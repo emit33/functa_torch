@@ -8,7 +8,7 @@ from dataclasses import asdict
 from tqdm import tqdm
 
 from functa_torch.utils.helpers import get_coordinate_grid, initialise_latent_vector
-from functa_torch.utils.data_handling import get_train_dataloader
+from functa_torch.utils.data_handling import determine_resolution, get_train_dataloader
 from functa_torch.utils.config import (
     ModelConfig,
     OtherConfig,
@@ -23,17 +23,21 @@ class image_loss(nn.Module):
         super().__init__()
         self.l2_weight = l2_weight
 
-    def forward(self, reconstructed, gt, params):
+    def forward(self, reconstructed, gt, params=None):
         # Reconstruction loss
-        mse_loss = F.mse_loss(reconstructed, gt)
+        loss = F.mse_loss(reconstructed, gt)
 
         # L2 norm of parameters
-        total_params = sum(p.numel() for p in params)
-        l2_reg = sum(torch.sum(p**2) for p in params) / total_params
+        if params is not None:
+            total_params = sum(p.numel() for p in params)
+            l2_reg = sum(torch.sum(p**2) for p in params) / total_params
 
-        total_loss = mse_loss + self.l2_weight * l2_reg
+            loss = loss + self.l2_weight * l2_reg
 
-        return total_loss
+            return loss
+
+        else:
+            return loss
 
 
 class latentModulatedTrainer(nn.Module):
@@ -68,7 +72,6 @@ class latentModulatedTrainer(nn.Module):
         self.inner_lr: float = training_config.inner_lr
         self.l2_weight: float = training_config.l2_weight
         self.inner_steps: int = training_config.inner_steps
-        self.resolution: int = training_config.resolution
         self.batch_size: int = training_config.batch_size
         self.n_epochs: int = training_config.n_epochs
         self.save_ckpt_step: Optional[int] = other_config.save_ckpt_step
@@ -76,6 +79,9 @@ class latentModulatedTrainer(nn.Module):
         # Further states
         self.device: torch.device = model_config.device
         self.model_config = model_config
+
+        # Determine resolution
+        self.resolution: int = determine_resolution(paths_config.data_dir)
 
         # Obtain train loader
         grayscale_flag = model_config.dim_out == 1
@@ -93,39 +99,32 @@ class latentModulatedTrainer(nn.Module):
             self.model.parameters(), lr=self.outer_lr
         )
 
-        # Initialise sampling grid as a buffer so that it gets moved to the correct device
-        grid = get_coordinate_grid(self.resolution)
-        self.register_buffer("sampling_grid", grid)
-        self.sampling_grid: torch.Tensor
-
-    def inner_loop(self, latent_vector, gt):
-        # Inner optimizer should have no memory of its state, every time we do inner
-        # loop optimization we are solving a new problem from scratch, so optimizer
-        # should be reinitialized. As we only update modulations with opt_inner,
-        # initialize with latent vector
-        optimizer = torch.optim.Adam([latent_vector], lr=self.inner_lr)
+    def inner_loop(self, sampling_grid, latent_vectors, gt):
+        # latent_vectors: [B, latent_dim]
+        # gt: [B, H, W]
+        optimizer = torch.optim.SGD([latent_vectors], lr=self.inner_lr)
 
         for _ in range(self.inner_steps):
             optimizer.zero_grad()
-            # Obtain reconstructed image
-            sampling_grid = self.sampling_grid.clone()  # Create copy for this iteration
-            im_out = self.model.reconstruct_image(sampling_grid, latent_vector)
+            # Obtain reconstructed images
+            ims = self.model.reconstruct_image(sampling_grid, latent_vectors)
 
-            # Calculate loss
-            loss = self.loss(im_out.squeeze(), gt.squeeze(), self.model.parameters())
+            # Caclulate loss
+            loss = self.loss(ims, gt)
 
-            # Update latent vector
+            # Update latent vectors
             loss.backward()
             optimizer.step()
 
-        return latent_vector
+        return latent_vectors
 
     def train(self):
-        n_train_images = len(self.trainloader.dataset)  # type: ignore
+        n_batches = len(self.trainloader)  # type: ignore
         avg_losses = []
-        proto_latent_vector = initialise_latent_vector(
-            self.latent_dim, self.latent_init_scale, self.device
-        )  # initialise latent vector once
+
+        # Initialise latent vectors once
+
+        # Initialise grid
 
         pbar = tqdm(range(self.n_epochs), desc="Epoch", ncols=80)
         for epoch in pbar:
@@ -135,46 +134,44 @@ class latentModulatedTrainer(nn.Module):
             for batch in self.trainloader:
                 # Load batch
                 images, paths = batch
+                B = len(paths)
+
                 images = images.to(self.device)  # [bs,C,H,W]
-                batch_size = len(paths)
+
+                # Initialise latents and sampling grid
+                latents = initialise_latent_vector(
+                    self.latent_dim,
+                    self.latent_init_scale,
+                    self.device,
+                    batch_size=B,
+                )
+                sampling_grid = get_coordinate_grid(
+                    self.resolution, batch_size=B, device=self.device
+                )
 
                 # Zero gradients
                 self.outer_optimizer.zero_grad()
 
                 # Find appropriate latent vectors for these batch elements using N_inner optimizer steps.
-                optimized_latents = []
-                final_reconstructions = []
-                outer_loss = torch.tensor(0.0, device=self.device)
-                for image in images:
+                optimized_latents = self.inner_loop(sampling_grid, latents, images)
 
-                    optimized_latent = self.inner_loop(
-                        nn.Parameter(proto_latent_vector.clone()), image
-                    )  # bs x latent_dim
-                    optimized_latents.append(optimized_latent)
+                # Obtain final reconstructions
+                final_reconstructions = self.model.reconstruct_image(
+                    sampling_grid,
+                    optimized_latents,
+                )
 
-                    # Compute loss wrt optimized latent vector
-                    final_reconstruction = self.model.reconstruct_image(
-                        self.sampling_grid.clone(), optimized_latent
-                    )
-                    final_reconstructions.append(final_reconstruction)
-
-                    # Add loss for the final image to outer loss
-                    outer_loss += (
-                        self.loss(
-                            final_reconstruction.squeeze(),
-                            image.squeeze(),
-                            self.model.parameters(),
-                        )
-                        / batch_size
-                    )
+                outer_loss = (
+                    self.loss(final_reconstructions, images, self.model.parameters())
+                    / B
+                )
 
                 # Update model parameters (not latent vector)
                 outer_loss.backward()
                 self.outer_optimizer.step()
 
                 # Accumulate loss for this epoch
-
-                epoch_loss += outer_loss.item() * batch_size
+                epoch_loss += outer_loss.item()
 
                 # Store latent vectors
                 latent_vectors.update(
@@ -185,10 +182,10 @@ class latentModulatedTrainer(nn.Module):
                 )
 
             # Store losses
-            avg_loss = epoch_loss / n_train_images
+            avg_loss = epoch_loss / n_batches
             avg_losses.append(avg_loss)
 
-            # Save model and latent vectors if new best epoch found
+            # Save model and latent vectors according to save_ckpt_step
             if epoch == self.n_epochs - 1 or (
                 self.save_ckpt_step is not None
                 and epoch != 0
