@@ -112,7 +112,7 @@ class latentModulatedTrainer(nn.Module):
             im_out = self.model.reconstruct_image(sampling_grid, latent_vector)
 
             # Calculate loss
-            loss = self.loss(im_out, gt, self.model.parameters())
+            loss = self.loss(im_out.squeeze(), gt.squeeze(), self.model.parameters())
 
             # Update latent vector
             loss.backward()

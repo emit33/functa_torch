@@ -33,7 +33,7 @@ class TrainingConfig:
     batch_size: int = 16
     n_epochs: int = 500
     resolution: int = 256
-    tensor_data: bool = False
+    tensor_data: bool = True
 
 
 @dataclass
@@ -41,8 +41,10 @@ class PathConfig:
     data_dir: Path
     checkpoints_dir: Path
     experiment_dir: Path
+    figs_dir: Path
 
 
+@dataclass
 class OtherConfig:
     save_ckpt_step: Optional[int] = None
     save_figs: Optional[bool] = None
@@ -54,6 +56,7 @@ class Config:
     training: TrainingConfig
     paths: PathConfig
     other: OtherConfig
+    experiment_name: str
 
     @classmethod
     def from_yaml(cls, yaml_path):
