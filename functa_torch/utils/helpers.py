@@ -76,9 +76,9 @@ def initialise_latent_vector(
 
     # Expand along batch dimension if desired
     if batch_size is not None:
-        latent_vector = latent_vector.unsqueeze(0).expand(batch_size, -1)
+        latent_vector = latent_vector.unsqueeze(0).repeat(batch_size, 1)
 
-    return nn.Parameter(latent_vector)
+    return latent_vector
 
 
 def check_for_checkpoints(checkpoint_dir):

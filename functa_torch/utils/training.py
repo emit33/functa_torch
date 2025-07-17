@@ -122,10 +122,6 @@ class latentModulatedTrainer(nn.Module):
         n_batches = len(self.trainloader)  # type: ignore
         avg_losses = []
 
-        # Initialise latent vectors once
-
-        # Initialise grid
-
         pbar = tqdm(range(self.n_epochs), desc="Epoch", ncols=80)
         for epoch in pbar:
             epoch_loss = 0
@@ -133,8 +129,8 @@ class latentModulatedTrainer(nn.Module):
 
             for batch in self.trainloader:
                 # Load batch
-                images, paths = batch
-                B = len(paths)
+                images, indices = batch
+                B = len(indices)
 
                 images = images.to(self.device)  # [bs,C,H,W]
 
@@ -153,7 +149,9 @@ class latentModulatedTrainer(nn.Module):
                 self.outer_optimizer.zero_grad()
 
                 # Find appropriate latent vectors for these batch elements using N_inner optimizer steps.
-                optimized_latents = self.inner_loop(sampling_grid, latents, images)
+                optimized_latents = self.inner_loop(
+                    sampling_grid, nn.Parameter(latents), images
+                )
 
                 # Obtain final reconstructions
                 final_reconstructions = self.model.reconstruct_image(
@@ -176,8 +174,8 @@ class latentModulatedTrainer(nn.Module):
                 # Store latent vectors
                 latent_vectors.update(
                     {
-                        img_path: latent.detach().cpu()
-                        for img_path, latent in zip(paths, optimized_latents)
+                        idx: latent.detach().cpu()
+                        for idx, latent in zip(indices, optimized_latents)
                     }
                 )
 
@@ -191,12 +189,15 @@ class latentModulatedTrainer(nn.Module):
                 and epoch != 0
                 and epoch % self.save_ckpt_step == 0
             ):
+                # Form latent vectors into a tensor
+                keys = sorted(latent_vectors.keys())
+                latent_tensor = torch.stack([latent_vectors[k] for k in keys], dim=0)
 
                 torch.save(
                     {
                         "epoch": epoch,
                         "model_state_dict": self.model.state_dict(),
-                        "latent_vectors": latent_vectors,
+                        "latent_vectors": latent_tensor,
                         "avg_losses": avg_losses,
                         "config": asdict(self.model_config),
                         "optimizer_state_dict": self.outer_optimizer.state_dict(),

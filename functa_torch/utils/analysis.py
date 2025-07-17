@@ -20,8 +20,8 @@ def get_last_checkpoint_path(checkpoint_dir):
 
 
 def get_imgs_from_functa_ckpt(
-    ckpt_path: str | Path, resolution: int = 256, n=9
-) -> dict:
+    ckpt_path: str | Path, resolution: int = 256, n=9, bs=15, device="cuda"
+) -> np.ndarray:
     if isinstance(ckpt_path, str):
         ckpt_path = Path(ckpt_path)
 
@@ -31,24 +31,30 @@ def get_imgs_from_functa_ckpt(
 
     model = LatentModulatedSiren(**config)
     model.load_state_dict(ckpt["model_state_dict"])
+    model.to(device)
 
     # Load latent vectors and reconstruct
-    latent_vecs_dict = ckpt["latent_vectors"]
+    latent_tensor = ckpt["latent_vectors"]
 
     if n is not None:
         # Subset to first n entries in dictionary
-        latent_vecs_dict = {k: v for k, v in list(latent_vecs_dict.items())[:n]}
+        latent_tensor = latent_tensor[:n]
+        # Ensure batch size doesn't exceed desired number of images
+        bs = min(bs, n)
 
-    grid = get_coordinate_grid(resolution)
+    grid = get_coordinate_grid(resolution, batch_size=bs)
 
-    reconstructed_imgs = {}
-    for img_path, latent_vec in latent_vecs_dict.items():
+    reconstructed_imgs = []
+    for i in range(0, len(latent_tensor), bs):
+        latent_vecs = latent_tensor[i : (i + bs)].to(device)
         with torch.no_grad():
             im_reconstructed = (
-                model.reconstruct_image(grid, latent_vec).numpy().squeeze()
+                model.reconstruct_image(grid, latent_vecs).cpu().numpy().squeeze()
             )
 
-        reconstructed_imgs[img_path] = im_reconstructed
+        reconstructed_imgs.append(im_reconstructed)
+
+    reconstructed_imgs = np.vstack(reconstructed_imgs)
 
     return reconstructed_imgs
 
@@ -74,10 +80,6 @@ def visualise_imgs(img_tensor, n: Optional[int] = 10, save_path=None, ncols=3, c
 def visualise_reconstructions(ckpt_dir, img_save_path, n=9):
     ckpt_path = get_last_checkpoint_path(ckpt_dir)
     reconstructions = get_imgs_from_functa_ckpt(ckpt_path, n=n)
-
-    reconstructions = np.stack(
-        [img_tensor for img_tensor in reconstructions.values()], axis=0
-    )  # Convert to array
 
     visualise_imgs(
         reconstructions,

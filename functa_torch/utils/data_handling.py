@@ -13,28 +13,55 @@ def determine_resolution(data_dir: Path):
     return resolution
 
 
-class ImageDatasetWithPaths(Dataset):
-    def __init__(self, data_dir: Path, transform=None):
-        self.data_dir = Path(data_dir)
-        self.transform = transform
+# class ImageDatasetWithPaths(Dataset): # Deprecated
+#     def __init__(self, data_dir: Path, transform=None):
+#         self.data_dir = Path(data_dir)
+#         self.transform = transform
 
-        # Get all image files
-        self.image_files = []
-        for ext in ["*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tiff"]:
-            self.image_files.extend(self.data_dir.glob(ext))
-            self.image_files.extend(self.data_dir.glob(ext.upper()))
+#         # Get all image files
+#         self.image_files = []
+#         for ext in ["*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tiff"]:
+#             self.image_files.extend(self.data_dir.glob(ext))
+#             self.image_files.extend(self.data_dir.glob(ext.upper()))
 
-    def __len__(self):
-        return len(self.image_files)
+#     def __len__(self):
+#         return len(self.image_files)
 
-    def __getitem__(self, idx):
-        img_path = self.image_files[idx]
-        image = Image.open(img_path).convert("RGB")
+#     def __getitem__(self, idx):
+#         img_path = self.image_files[idx]
+#         image = Image.open(img_path).convert("RGB")
 
-        if self.transform:
-            image = self.transform(image)
+#         if self.transform:
+#             image = self.transform(image)
 
-        return image, str(img_path)  # Return both image and path
+#         return image, str(img_path)  # Return both image and path
+
+# def get_img_dir_dataloader( # Deprecated
+#     data_dir: Path, batch_size: int = 32, resolution: int = 256, grayscale=False
+# ):
+#     transform_list = []
+#     if grayscale:
+#         transform_list.append(transforms.Grayscale())
+
+#     transform_list += [
+#         transforms.Resize((resolution, resolution)),
+#         transforms.ToTensor(),
+#         transforms.Lambda(lambda t: t.permute(1, 2, 0)),  # change from CHW to HWC
+#     ]
+
+#     transform = transforms.Compose(transform_list)
+
+#     dataset = ImageDatasetWithPaths(data_dir, transform=transform)
+
+#     dataloader = DataLoader(
+#         dataset,
+#         batch_size=batch_size,
+#         shuffle=True,
+#         num_workers=4,
+#         pin_memory=True if torch.cuda.is_available() else False,
+#     )
+
+#     return dataloader
 
 
 class TensorDataset_pair_output(Dataset):
@@ -56,35 +83,7 @@ class TensorDataset_pair_output(Dataset):
 
     def __getitem__(self, idx):
 
-        return self.data_tensor[idx], f"img_{idx}"
-
-
-def get_img_dir_dataloader(
-    data_dir: Path, batch_size: int = 32, resolution: int = 256, grayscale=False
-):
-    transform_list = []
-    if grayscale:
-        transform_list.append(transforms.Grayscale())
-
-    transform_list += [
-        transforms.Resize((resolution, resolution)),
-        transforms.ToTensor(),
-        transforms.Lambda(lambda t: t.permute(1, 2, 0)),  # change from CHW to HWC
-    ]
-
-    transform = transforms.Compose(transform_list)
-
-    dataset = ImageDatasetWithPaths(data_dir, transform=transform)
-
-    dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True if torch.cuda.is_available() else False,
-    )
-
-    return dataloader
+        return self.data_tensor[idx], idx
 
 
 def get_tensor_data_dataloader(data_dir: Path, batch_size: int = 32, grayscale=False):
@@ -111,4 +110,5 @@ def get_train_dataloader(
     if tensor_data:
         return get_tensor_data_dataloader(data_dir, batch_size, grayscale)
     else:
-        return get_img_dir_dataloader(data_dir, batch_size, resolution, grayscale)
+        raise ValueError("Non-tensor data deprecated")
+        # return get_img_dir_dataloader(data_dir, batch_size, resolution, grayscale)
