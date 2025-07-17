@@ -34,12 +34,14 @@ def main():
     trainer.train()
 
     # Create visualisations
-    if config.other.save_figs:
+    if config.paths.figs_dir is not None:
         visualise_reconstructions(
-            config.paths.checkpoints_dir, config.paths.experiment_dir / "imgs.png"
+            config.paths.checkpoints_dir,
+            config.paths.figs_dir / (config.experiment_name + "_imgs.png"),
         )
         visualise_loss(
-            config.paths.checkpoints_dir, config.paths.experiment_dir / "loss.png"
+            config.paths.checkpoints_dir,
+            config.paths.figs_dir / (config.experiment_name + "_loss.png"),
         )
 
 

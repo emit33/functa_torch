@@ -10,7 +10,7 @@ from functa_torch.utils.training import latentModulatedTrainer
 def main():
     # Obtain config
     config = Config.from_yaml(
-        "/home/tempus/projects/functa_experiments/00_test_config/config.yaml"
+        "/home/tempus/projects/functa_experiments/01_triangles_safe/config.yaml"
     )
 
     if os.path.exists(config.paths.checkpoints_dir):

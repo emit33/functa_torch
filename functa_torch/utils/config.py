@@ -55,7 +55,6 @@ class Config:
     paths: PathConfig
     other: OtherConfig
     experiment_name: str
-    experiment_number: int
 
     @classmethod
     def from_yaml(cls, yaml_path):

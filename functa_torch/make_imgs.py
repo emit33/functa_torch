@@ -9,11 +9,9 @@ if __name__ == "__main__":
 
     visualise_reconstructions(
         config.paths.checkpoints_dir,
-        config.paths.figs_dir
-        / (str(config.experiment_number) + "_" + config.experiment_name + "_imgs.png"),
+        config.paths.figs_dir / (config.experiment_name + "_imgs.png"),
     )
     visualise_loss(
         config.paths.checkpoints_dir,
-        config.paths.figs_dir
-        / (str(config.experiment_number) + "_" + config.experiment_name + "_loss.png"),
+        config.paths.figs_dir / (config.experiment_name + "_loss.png"),
     )
