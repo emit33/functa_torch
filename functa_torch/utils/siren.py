@@ -8,6 +8,45 @@ from torch import Tensor
 import numpy as np
 
 
+class MetaSGDLrs(nn.Module):
+    """
+    Module storing learning rates for meta-sgd.
+
+    Notes:
+    This module does not apply any transformation but simply stores the learning
+    rates. Since we also learn the learning rates we treat them the same as
+    model params.
+    """
+
+    def __init__(
+        self,
+        num_lrs: int,
+        lrs_init_range: Tuple[float, float] = (0.005, 0.1),
+        lrs_clip_range: Tuple[float, float] = (-5.0, 5.0),
+    ):
+        """Constructor.
+
+        Args:
+        num_lrs: Number of learning rates to learn.
+        lrs_init_range: Range from which initial learning rates will be
+            uniformly sampled.
+        lrs_clip_range: Range at which to clip learning rates. Default value will
+            effectively avoid any clipping, but typically learning rates should
+            be positive and small.
+        """
+        super().__init__()
+        self.num_lrs = num_lrs
+        self.lrs_init_range = lrs_init_range
+        self.lrs_clip_range = lrs_clip_range
+
+        # Initialize learning rates
+        meta_sgd_lrs = (  # Initialise via sampling Uniform[0,1]
+            torch.rand(num_lrs) * (lrs_init_range[1] - lrs_init_range[0])
+            + lrs_init_range[0]
+        )
+        self.meta_sgd_lrs = nn.Parameter(meta_sgd_lrs)
+
+
 class Sine(nn.Module):
     """Applies a scaled sine transform to input: out = sin(w0 * in)."""
 
@@ -393,7 +432,7 @@ class LatentModulatedSiren(nn.Module):
             )
 
         if self.use_meta_sgd:
-            raise NotImplementedError("Meta SGD not yet implemented")
+            self.meta_sgd_lrs = MetaSGDLrs(latent_dim)
 
         # Initialise Sine activations
         self.sinew0 = Sine(w0)
@@ -456,57 +495,6 @@ class LatentModulatedSiren(nn.Module):
         )
 
         return nn.ModuleList(layers)
-
-    # def modulate(self, x: Tensor, modulations: Dict[str, Tensor]) -> Tensor:
-    #     """Modulates input according to modulations.
-
-    #     Args:
-    #     x: Hidden features of MLP.
-    #     modulations: Dict with keys 'scale' and 'shift' (or only one of them)
-    #         containing modulations.
-
-    #     Returns:
-    #     Modulated vector.
-    #     """
-    #     if "scale" in modulations:
-    #         x = modulations["scale"] * x
-    #     if "shift" in modulations:
-    #         x = x + modulations["shift"]
-    #     return x
-
-    # def forward(self, coords: Tensor, latent_vector) -> Tensor:
-    #     """Evaluates model at a batch of coordinates.
-
-    #     Args:
-    #     coords (Array): Array of coordinates. Should have shape (height, width, 2)
-    #         for images and (depth/time, height, width, 3) for 3D shapes/videos.
-
-    #     Returns:
-    #     Output features at coords.
-    #     """
-    #     # Check coordinate dimensions
-    #     assert (
-    #         coords.shape[-1] == self.dim_in
-    #     ), f"Expected {self.dim_in} coordinate dimensions, got {coords.shape[-1]}"
-
-    #     # Compute modulations from latent vector
-    #     modulations = self.latent_to_modulation(latent_vector)
-
-    #     # Flatten coordinates
-    #     x = torch.reshape(coords, (-1, coords.shape[-1]))
-
-    #     # Layers before final layer
-    #     for i, layer in enumerate(self.layers[:-1]):
-    #         x = layer(x)
-    #         x = self.modulate(x, modulations[i])
-    #         x = self.sinew0(x)
-
-    #     out = self.layers[-1](x)
-
-    #     if self.final_activation is not None:
-    #         out = self.final_activation(out)
-
-    #     return torch.reshape(out, list(coords.shape[:-1]) + [self.dim_out])
 
     def forward(
         self, coords: Tensor, latent: Tensor  # [B, N_points, dim_in]  # [B, latent_dim]

@@ -18,6 +18,7 @@ class ModelConfig:
     w0: float = 1.0
     modulate_scale: bool = True
     modulate_shift: bool = True
+    use_meta_sgd: bool = False
     final_activation: Optional[Literal["sigmoid"]] = None
     device: torch.device = torch.device("cuda")
 

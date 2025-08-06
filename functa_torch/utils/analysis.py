@@ -20,7 +20,11 @@ def get_last_checkpoint_path(checkpoint_dir):
 
 
 def get_imgs_from_functa_ckpt(
-    ckpt_path: str | Path, resolution: int = 256, n=9, bs=15, device="cuda"
+    ckpt_path: str | Path,
+    resolution: int = 256,
+    n=9,
+    bs=15,
+    device="cuda",
 ) -> np.ndarray:
     if isinstance(ckpt_path, str):
         ckpt_path = Path(ckpt_path)

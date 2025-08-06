@@ -49,23 +49,13 @@ class latentModulatedTrainer(nn.Module):
         other_config: OtherConfig,
     ):
         super().__init__()
-        self.model: LatentModulatedSiren = LatentModulatedSiren(
-            model_config.width,
-            model_config.depth,
-            model_config.dim_in,
-            model_config.dim_out,
-            model_config.latent_dim,
-            model_config.layer_sizes,
-            model_config.w0,
-            model_config.modulate_scale,
-            model_config.modulate_shift,
-            model_config.final_activation,
-        )
+        self.model: LatentModulatedSiren = LatentModulatedSiren(**asdict(model_config))
         # Paths
         self.checkpoint_dir: Path = paths_config.checkpoints_dir
         os.makedirs(self.checkpoint_dir, exist_ok=True)
 
         # Training hparams
+        self.use_meta_sgd: bool = model_config.use_meta_sgd
         self.latent_dim: int = model_config.latent_dim
         self.latent_init_scale: float = training_config.latent_init_scale
         self.outer_lr: float = training_config.outer_lr
@@ -99,7 +89,7 @@ class latentModulatedTrainer(nn.Module):
             self.model.parameters(), lr=self.outer_lr
         )
 
-    def inner_loop(self, sampling_grid, latent_vectors, gt):
+    def inner_loop_sgd(self, sampling_grid, latent_vectors, gt):
         # latent_vectors: [B, latent_dim]
         # gt: [B, H, W]
         optimizer = torch.optim.SGD([latent_vectors], lr=self.inner_lr)
@@ -115,6 +105,28 @@ class latentModulatedTrainer(nn.Module):
             # Update latent vectors
             loss.backward()
             optimizer.step()
+
+        return latent_vectors
+
+    def inner_loop_metasgd(self, sampling_grid, latent_vectors, gt):
+        # latent_vectors: [B, latent_dim]
+        # gt: [B, H, W]
+        for _ in range(self.inner_steps):
+            # 1) forward
+            ims = self.model.reconstruct_image(sampling_grid, latent_vectors)
+            loss = self.loss(ims, gt)
+
+            # 2) compute inner‐loop grads *as part of the graph*
+            grads = torch.autograd.grad(loss, latent_vectors, create_graph=True)[0]
+
+            # 3) pull out your learned lrs and broadcast to match [B,latent_dim]
+            lrs = self.model.meta_sgd_lrs.meta_sgd_lrs.unsqueeze(0)
+
+            # 4) functional update (no in‐place!)
+            latent_vectors = latent_vectors - lrs * grads
+
+            # after this `latent` is a new Tensor with requires_grad=True
+            # so it can be used in the next inner step
 
         return latent_vectors
 
@@ -149,9 +161,14 @@ class latentModulatedTrainer(nn.Module):
                 self.outer_optimizer.zero_grad()
 
                 # Find appropriate latent vectors for these batch elements using N_inner optimizer steps.
-                optimized_latents = self.inner_loop(
-                    sampling_grid, nn.Parameter(latents), images
-                )
+                if not self.use_meta_sgd:
+                    optimized_latents = self.inner_loop_sgd(
+                        sampling_grid, nn.Parameter(latents), images
+                    )
+                else:
+                    optimized_latents = self.inner_loop_metasgd(
+                        sampling_grid, nn.Parameter(latents), images
+                    )
 
                 # Obtain final reconstructions
                 final_reconstructions = self.model.reconstruct_image(
