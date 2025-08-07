@@ -5,12 +5,23 @@ from torchvision import transforms
 from PIL import Image
 
 
-def determine_resolution(data_dir: Path):
-    imgs = torch.load(data_dir / "imgs.pt").squeeze()
-    assert imgs.shape[-1] == imgs.shape[-2], "Currently require square images"
+def determine_resolution(data_dir: Path) -> int:
+    imgs = torch.load(data_dir / "imgs.pt")  # Shape: (num_imgs, H, W, C)
+    assert imgs.shape[-2] == imgs.shape[-3], "Currently require square images"
 
-    resolution = imgs.shape[-1]
+    resolution = imgs.shape[-2]
     return resolution
+
+
+def determine_dim_out(data_dir: Path) -> int:
+    imgs = torch.load(data_dir / "imgs.pt")  # Shape: (num_imgs, H, W, C)
+    assert imgs.shape[-1] in [
+        1,
+        3,
+    ], f"Expected output dimension to be 1 or 3, got shape {imgs.shape}; is this data formatted correctly?"
+
+    dim_out = imgs.shape[-1]
+    return dim_out
 
 
 # class ImageDatasetWithPaths(Dataset): # Deprecated

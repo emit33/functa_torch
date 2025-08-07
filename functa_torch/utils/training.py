@@ -8,7 +8,11 @@ from dataclasses import asdict
 from tqdm import tqdm
 
 from functa_torch.utils.helpers import get_coordinate_grid, initialise_latent_vector
-from functa_torch.utils.data_handling import determine_resolution, get_train_dataloader
+from functa_torch.utils.data_handling import (
+    determine_dim_out,
+    determine_resolution,
+    get_train_dataloader,
+)
 from functa_torch.utils.config import (
     ModelConfig,
     OtherConfig,
@@ -49,6 +53,7 @@ class latentModulatedTrainer(nn.Module):
         other_config: OtherConfig,
     ):
         super().__init__()
+        model_config.dim_out = determine_dim_out(paths_config.data_dir)
         self.model: LatentModulatedSiren = LatentModulatedSiren(**asdict(model_config))
         # Paths
         self.checkpoint_dir: Path = paths_config.checkpoints_dir
