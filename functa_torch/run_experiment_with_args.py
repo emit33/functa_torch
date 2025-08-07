@@ -3,7 +3,7 @@ import shutil
 import argparse
 
 import yaml
-from functa_torch.utils.analysis import visualise_loss, visualise_reconstructions
+from functa_torch.utils.analysis import visualise_combined
 from functa_torch.utils.config import Config
 from functa_torch.utils.training import latentModulatedTrainer
 
@@ -35,13 +35,9 @@ def main():
 
     # Create visualisations
     if config.paths.figs_dir is not None:
-        visualise_reconstructions(
+        visualise_combined(
             config.paths.checkpoints_dir,
             config.paths.figs_dir / (config.experiment_name + "_imgs.png"),
-        )
-        visualise_loss(
-            config.paths.checkpoints_dir,
-            config.paths.figs_dir / (config.experiment_name + "_loss.png"),
         )
 
 

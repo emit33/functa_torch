@@ -1,17 +1,13 @@
 import os
 import shutil
 
-import numpy as np
-from functa_torch.utils.analysis import visualise_loss, visualise_reconstructions
-from functa_torch.utils.config import Config
+from functa_torch.utils.analysis import visualise_combined
+from functa_torch.utils.nonpublic import get_config_from_experiment_ind
 from functa_torch.utils.training import latentModulatedTrainer
 
 
-def main():
-    # Obtain config
-    config = Config.from_yaml(
-        "/home/tempus/projects/functa_experiments/01_triangles_safe/config.yaml"
-    )
+def run_experiment(experiment_ind):
+    config = get_config_from_experiment_ind(experiment_ind)
 
     if os.path.exists(config.paths.checkpoints_dir):
         shutil.rmtree(config.paths.checkpoints_dir)
@@ -24,15 +20,12 @@ def main():
 
     # Create visualisations
     if config.paths.figs_dir is not None:
-        visualise_reconstructions(
+        visualise_combined(
             config.paths.checkpoints_dir,
             config.paths.figs_dir / (config.experiment_name + "_imgs.png"),
-        )
-        visualise_loss(
-            config.paths.checkpoints_dir,
-            config.paths.figs_dir / (config.experiment_name + "_loss.png"),
         )
 
 
 if __name__ == "__main__":
-    main()
+    experiment_number = 35
+    run_experiment(experiment_number)
