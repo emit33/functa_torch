@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+import torch
+
 from functa_torch.utils.config import Config
 
 
@@ -40,3 +42,36 @@ def get_config_from_experiment_ind(experiment_ind):
     config = Config.from_yaml(config_path)
 
     return config
+
+
+def get_wdl(experiment_dir) -> tuple[int, int, int]:
+    w_str, d_str, l_str = experiment_dir.name.split("_")[-3:]
+    return (
+        int(w_str),
+        int(d_str),
+        int(l_str),
+    )
+    # Written like this to satsify type checker
+
+
+def get_final_checkpoint(experiment_dir):
+    ckpt_names = os.listdir(experiment_dir / "ckpts")
+
+    # Sort
+    ckpt_names = sorted(
+        ckpt_names, key=lambda x: int(x.split("_")[-1].removesuffix(".pth"))
+    )
+
+    if ckpt_names == []:
+        return None
+    else:
+        return experiment_dir / "ckpts" / ckpt_names[-1]
+
+
+def get_losses(experiment_dir):
+    final_ckpt_path = get_final_checkpoint(experiment_dir)
+    if final_ckpt_path is None:
+        return None
+    final_ckpt = torch.load(final_ckpt_path)
+
+    return final_ckpt["avg_losses"]
