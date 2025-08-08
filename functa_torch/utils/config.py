@@ -33,6 +33,7 @@ class TrainingConfig:
     batch_size: int = 16
     n_epochs: int = 500
     tensor_data: bool = True
+    use_lr_schedule: bool = False
 
 
 @dataclass

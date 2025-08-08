@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from dataclasses import asdict
 from tqdm import tqdm
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from functa_torch.utils.helpers import get_coordinate_grid, initialise_latent_vector
 from functa_torch.utils.data_handling import (
@@ -70,6 +71,7 @@ class latentModulatedTrainer(nn.Module):
         self.batch_size: int = training_config.batch_size
         self.n_epochs: int = training_config.n_epochs
         self.save_ckpt_step: Optional[int] = other_config.save_ckpt_step
+        self.use_lr_schedule: bool = training_config.use_lr_schedule
 
         # Further states
         self.device: torch.device = model_config.device
@@ -79,12 +81,9 @@ class latentModulatedTrainer(nn.Module):
         self.resolution: int = determine_resolution(paths_config.data_dir)
 
         # Obtain train loader
-        grayscale_flag = model_config.dim_out == 1
         self.trainloader = get_train_dataloader(
             paths_config.data_dir,
             self.batch_size,
-            self.resolution,
-            grayscale=grayscale_flag,
             tensor_data=training_config.tensor_data,
         )
 
@@ -93,6 +92,11 @@ class latentModulatedTrainer(nn.Module):
         self.outer_optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.outer_lr
         )
+
+        if self.use_lr_schedule:
+            self.scheduler = ReduceLROnPlateau(
+                self.outer_optimizer, "min", patience=500, factor=0.5
+            )
 
     def inner_loop_sgd(self, sampling_grid, latent_vectors, gt):
         # latent_vectors: [B, latent_dim]
@@ -124,14 +128,9 @@ class latentModulatedTrainer(nn.Module):
             # 2) compute inner‐loop grads *as part of the graph*
             grads = torch.autograd.grad(loss, latent_vectors, create_graph=True)[0]
 
-            # 3) pull out your learned lrs and broadcast to match [B,latent_dim]
+            # Obtain lrs and update latent_vectors
             lrs = self.model.meta_sgd_lrs.meta_sgd_lrs.unsqueeze(0)
-
-            # 4) functional update (no in‐place!)
             latent_vectors = latent_vectors - lrs * grads
-
-            # after this `latent` is a new Tensor with requires_grad=True
-            # so it can be used in the next inner step
 
         return latent_vectors
 
@@ -189,6 +188,9 @@ class latentModulatedTrainer(nn.Module):
                 # Update model parameters (not latent vector)
                 outer_loss.backward()
                 self.outer_optimizer.step()
+
+                if self.use_lr_schedule:
+                    self.scheduler.step(outer_loss)
 
                 # Accumulate loss for this epoch
                 epoch_loss += outer_loss.item()
