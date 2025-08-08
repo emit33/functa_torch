@@ -56,9 +56,39 @@ def get_imgs_from_functa_ckpt(
     for i in range(0, len(latent_tensor), bs):
         latent_vecs = latent_tensor[i : (i + bs)].to(device)
         with torch.no_grad():
-            im_reconstructed = (
-                model.reconstruct_image(grid, latent_vecs).cpu().numpy().squeeze()
-            )
+            im_reconstructed = model.reconstruct_image(grid, latent_vecs).cpu().numpy()
+
+        reconstructed_imgs.append(im_reconstructed)
+
+    reconstructed_imgs = np.vstack(reconstructed_imgs)
+
+    return reconstructed_imgs
+
+
+def reconstruct_images_from_latents(
+    latent_vecs: torch.Tensor, ckpt_path, resolution: int = 64, device="cuda", bs=40
+) -> np.ndarray:
+    # Ensure latent_vecs is of shape n_samples x latent_dim:
+    if len(latent_vecs.shape) == 1:
+        latent_vecs.unsqueeze(0)
+
+    # Load model
+    ckpt = torch.load(ckpt_path)
+    config = ckpt["config"]
+
+    model = LatentModulatedSiren(**config)
+    model.load_state_dict(ckpt["model_state_dict"])
+    model.to(device)
+
+    # Reconstruct
+    bs = min(bs, len(latent_vecs))
+    grid = get_coordinate_grid(resolution, batch_size=bs)
+
+    reconstructed_imgs = []
+    for i in range(0, len(latent_vecs), bs):
+        latent_vecs = latent_vecs[i : (i + bs)].to(device)
+        with torch.no_grad():
+            im_reconstructed = model.reconstruct_image(grid, latent_vecs).cpu().numpy()
 
         reconstructed_imgs.append(im_reconstructed)
 
