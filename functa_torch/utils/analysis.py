@@ -34,7 +34,7 @@ def get_imgs_from_functa_ckpt(
         ckpt_path = Path(ckpt_path)
 
     # Load model
-    ckpt = torch.load(ckpt_path)
+    ckpt = torch.load(ckpt_path, weights_only=False)
     config = ckpt["config"]
 
     model = LatentModulatedSiren(**config)

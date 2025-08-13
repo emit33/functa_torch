@@ -2,7 +2,6 @@ import os
 import shutil
 import argparse
 
-import yaml
 from functa_torch.utils.analysis import visualise_combined
 from functa_torch.utils.config import Config
 from functa_torch.utils.training import latentModulatedTrainer
