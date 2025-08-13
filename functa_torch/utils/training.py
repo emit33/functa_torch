@@ -95,7 +95,10 @@ class latentModulatedTrainer(nn.Module):
 
         if self.use_lr_schedule:
             self.scheduler = ReduceLROnPlateau(
-                self.outer_optimizer, "min", patience=500, factor=0.5
+                self.outer_optimizer,
+                "min",
+                patience=500,
+                factor=0.7,
             )
 
     def inner_loop_sgd(self, sampling_grid, latent_vectors, gt):
