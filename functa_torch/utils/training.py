@@ -7,6 +7,8 @@ import torch.nn.functional as F
 from dataclasses import asdict
 from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+import wandb
+from torchvision.utils import make_grid
 
 from functa_torch.utils.helpers import get_coordinate_grid, initialise_latent_vector
 from functa_torch.utils.data_handling import (
@@ -56,6 +58,7 @@ class latentModulatedTrainer(nn.Module):
         super().__init__()
         model_config.dim_out = determine_dim_out(paths_config.data_dir)
         self.model: LatentModulatedSiren = LatentModulatedSiren(**asdict(model_config))
+
         # Paths
         self.checkpoint_dir: Path = paths_config.checkpoints_dir
         os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -72,6 +75,7 @@ class latentModulatedTrainer(nn.Module):
         self.n_epochs: int = training_config.n_epochs
         self.save_ckpt_step: Optional[int] = other_config.save_ckpt_step
         self.use_lr_schedule: bool = training_config.use_lr_schedule
+        self.n_warmup_epochs: int = training_config.n_warmup_epochs
 
         # Further states
         self.device: torch.device = model_config.device
@@ -85,6 +89,7 @@ class latentModulatedTrainer(nn.Module):
             paths_config.data_dir,
             self.batch_size,
             tensor_data=training_config.tensor_data,
+            normalise=training_config.normalise,
         )
 
         # Initialise training functions
@@ -101,7 +106,27 @@ class latentModulatedTrainer(nn.Module):
                 factor=0.7,
             )
 
-    def inner_loop_sgd(self, sampling_grid, latent_vectors, gt):
+    def determine_save_ckpt(self, epoch: int, avg_losses) -> tuple[bool, bool]:
+        # Check if checkpoint should be saved due to being regular
+        if epoch == self.n_epochs - 1 or (
+            self.save_ckpt_step is not None
+            and epoch != 0
+            and epoch % self.save_ckpt_step == 0
+        ):
+
+            return True, False
+
+        if (epoch > self.n_warmup_epochs) and (
+            avg_losses[-1] < (0.9 * min(avg_losses[:-1]))
+        ):
+            return True, True
+
+        else:
+            return False, False
+
+    def inner_loop_sgd(
+        self, sampling_grid, latent_vectors, gt, sample_prop: Optional[float] = None
+    ):
         # latent_vectors: [B, latent_dim]
         # gt: [B, H, W]
         optimizer = torch.optim.SGD([latent_vectors], lr=self.inner_lr)
@@ -138,20 +163,23 @@ class latentModulatedTrainer(nn.Module):
         return latent_vectors
 
     def train(self):
-        n_batches = len(self.trainloader)  # type: ignore
+        n_batches = len(self.trainloader)
+        n_imgs = len(self.trainloader.dataset)  # type: ignore
         avg_losses = []
 
         pbar = tqdm(range(self.n_epochs), desc="Epoch", ncols=80)
         for epoch in pbar:
             epoch_loss = 0
-            latent_vectors = {}
+            latent_vectors_all = torch.empty(
+                (n_imgs, self.model_config.latent_dim), dtype=torch.float32
+            )
 
             for batch in self.trainloader:
                 # Load batch
                 images, indices = batch
                 B = len(indices)
 
-                images = images.to(self.device)  # [bs,C,H,W]
+                images = images.to(self.device, non_blocking=True)  # [bs,C,H,W]
 
                 # Initialise latents and sampling grid
                 latents = initialise_latent_vector(
@@ -192,43 +220,55 @@ class latentModulatedTrainer(nn.Module):
                 outer_loss.backward()
                 self.outer_optimizer.step()
 
-                if self.use_lr_schedule:
-                    self.scheduler.step(outer_loss)
-
                 # Accumulate loss for this epoch
                 epoch_loss += outer_loss.item()
 
                 # Store latent vectors
-                latent_vectors.update(
-                    {
-                        idx: latent.detach().cpu()
-                        for idx, latent in zip(indices, optimized_latents)
-                    }
-                )
+                latent_vectors_all[indices] = optimized_latents.detach().cpu()
+
+            if self.use_lr_schedule:
+                self.scheduler.step(outer_loss)
 
             # Store losses
             avg_loss = epoch_loss / n_batches
             avg_losses.append(avg_loss)
+            wandb.log({"train/avg_loss": avg_loss, "epoch": epoch})
 
             # Save model and latent vectors according to save_ckpt_step
-            if epoch == self.n_epochs - 1 or (
-                self.save_ckpt_step is not None
-                and epoch != 0
-                and epoch % self.save_ckpt_step == 0
-            ):
-                # Form latent vectors into a tensor
-                keys = sorted(latent_vectors.keys())
-                latent_tensor = torch.stack([latent_vectors[k] for k in keys], dim=0)
+            save_ckpt_flag, is_best_flag = self.determine_save_ckpt(epoch, avg_losses)
+            if save_ckpt_flag:
+                # Log images
+                if is_best_flag:
+                    # Build a grid (detach & clamp/normalize as needed)
+                    grid = make_grid(
+                        final_reconstructions[:4].detach().cpu(),
+                        nrow=4,
+                    )
+
+                    wandb.log(
+                        {
+                            "best/recon_samples": wandb.Image(
+                                grid, caption=f"epoch {epoch}"
+                            ),
+                            "epoch": epoch,
+                        }
+                    )
+
+                save_path = (
+                    self.checkpoint_dir / f"checkpoint_best"
+                    if is_best_flag
+                    else self.checkpoint_dir / f"checkpoint_epoch_{epoch}.pth"
+                )
 
                 torch.save(
                     {
                         "epoch": epoch,
                         "model_state_dict": self.model.state_dict(),
-                        "latent_vectors": latent_tensor,
+                        "latent_vectors": latent_vectors_all,
                         "avg_losses": avg_losses,
                         "config": asdict(self.model_config),
                         "optimizer_state_dict": self.outer_optimizer.state_dict(),
                     },
-                    self.checkpoint_dir / f"checkpoint_epoch_{epoch}.pth",
+                    save_path,
                 )
             pbar.set_postfix(avg_loss=f"{avg_loss:.4f}")
