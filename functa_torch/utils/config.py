@@ -1,6 +1,6 @@
 # config.py
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Literal, Optional, Tuple
 import yaml
 import torch
@@ -34,6 +34,8 @@ class TrainingConfig:
     n_epochs: int = 500
     tensor_data: bool = True
     use_lr_schedule: bool = False
+    normalise: Literal["01", "imagenet"] = "01"
+    n_warmup_epochs: int = 500
 
 
 @dataclass
@@ -75,3 +77,20 @@ class Config:
         )
 
         return from_dict(data_class=cls, data=config_dict, config=dacite_config)
+
+
+def make_serializable(cfg):
+    def convert(v):
+        if is_dataclass(v) and not isinstance(v, type):
+            return convert(asdict(v))
+        if isinstance(v, dict):
+            return {k: convert(val) for k, val in v.items()}
+        if isinstance(v, (list, tuple)):
+            return [convert(x) for x in v]
+        if isinstance(v, Path):
+            return str(v)
+        if isinstance(v, torch.device):
+            return str(v)  # e.g. 'cuda' / 'cpu'
+        return v
+
+    return convert(cfg)

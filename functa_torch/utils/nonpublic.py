@@ -32,7 +32,7 @@ def find_matching_experiments(experiment_parent, inds):
 
 def get_config_from_experiment_ind(experiment_ind):
     matched_experiment = find_matching_experiments(
-        "/home/tempus/projects/functa_experiments", experiment_ind
+        "/g/kreshuk/tempus/projects/functa_experiments", experiment_ind
     )
     assert len(matched_experiment) == 1, "Non-unique experiment index given"
 
