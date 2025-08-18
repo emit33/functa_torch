@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Literal
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
 
 
 def determine_resolution(data_dir: Path) -> int:
@@ -47,8 +46,19 @@ class TensorDataset_pair_output(Dataset):
 
             imagenet_mean = [0.485, 0.456, 0.406]
             imagenet_std = [0.229, 0.224, 0.225]
-            normaliser = transforms.Normalize(imagenet_mean, imagenet_std)
-            self.data_tensor = normaliser(self.data_tensor)
+
+            imagenet_mean = torch.tensor(
+                [0.485, 0.456, 0.406],
+                dtype=self.data_tensor.dtype,
+                device=self.data_tensor.device,
+            ).view(1, 1, 1, 3)
+            imagenet_std = torch.tensor(
+                [0.229, 0.224, 0.225],
+                dtype=self.data_tensor.dtype,
+                device=self.data_tensor.device,
+            ).view(1, 1, 1, 3)
+
+            self.data_tensor = (self.data_tensor - imagenet_mean) / imagenet_std
 
     def __len__(self):
         return len(self.data_tensor)
