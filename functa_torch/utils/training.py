@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -76,6 +76,7 @@ class latentModulatedTrainer(nn.Module):
         self.save_ckpt_step: Optional[int] = other_config.save_ckpt_step
         self.use_lr_schedule: bool = training_config.use_lr_schedule
         self.n_warmup_epochs: int = training_config.n_warmup_epochs
+        self.sample_prop: Optional[float] = training_config.sample_prop
 
         # Further states
         self.device: torch.device = model_config.device
@@ -106,6 +107,39 @@ class latentModulatedTrainer(nn.Module):
                 factor=0.7,
             )
 
+    def _sample_pixels(
+        self,
+        sampling_grid: torch.Tensor,  # [B, H, W, 2]  (or [B, H, W, dim_in])
+        images: torch.Tensor,  # [B, H, W, C]
+        sample_prop: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Subsample a proportion of spatial positions (same indices for every item in batch).
+
+        Returns:
+            sub_grid: [B, k, C]          sampled coordinates
+            sub_gt:   [B, k, C]          ground‑truth pixel values
+            idx:      [k]                flat indices (0..H*W-1)
+        """
+        B, H, W, coord_dim = sampling_grid.shape
+        _, H2, W2, C = images.shape
+        assert H == H2 and W == W2, "Grid and image spatial dims must match"
+
+        N = H * W
+        k = max(1, int(sample_prop * N))
+
+        # Choose k flat spatial indices (uniform without replacement)
+        idx = torch.randperm(N, device=sampling_grid.device)[:k]  # [k]
+
+        # Flatten spatial dims
+        grid_flat = sampling_grid.view(B, N, coord_dim)  # [B, N, 2]
+        imgs_flat = images.view(B, N, C)  # [B, N, C]
+
+        sub_grid = grid_flat[:, idx]  # [B, k, 2]
+        sub_gt = imgs_flat[:, idx]  # [B, k, C]
+
+        return sub_grid, sub_gt, idx
+
     def determine_save_ckpt(self, epoch: int, avg_losses) -> tuple[bool, bool]:
         # Check if checkpoint should be saved due to being regular
         if epoch == self.n_epochs - 1 or (
@@ -133,11 +167,18 @@ class latentModulatedTrainer(nn.Module):
 
         for _ in range(self.inner_steps):
             optimizer.zero_grad()
-            # Obtain reconstructed images
-            ims = self.model.reconstruct_image(sampling_grid, latent_vectors)
-
-            # Caclulate loss
-            loss = self.loss(ims, gt)
+            # Obtain loss either with subsampled pixels or with all pixels
+            if sample_prop is not None:
+                sub_grid, sub_gt, _ = self._sample_pixels(
+                    sampling_grid, gt, sample_prop
+                )
+                # model should produce [B, k, C] for sub_grid
+                preds = self.model.forward(sub_grid, latent_vectors)
+                loss = F.mse_loss(preds, sub_gt)
+            else:
+                ims_full = self.model.reconstruct_image(sampling_grid, latent_vectors)
+                # ims_full expected [B, C, H, W]; match gt
+                loss = self.loss(ims_full, gt)
 
             # Update latent vectors
             loss.backward()
@@ -145,13 +186,22 @@ class latentModulatedTrainer(nn.Module):
 
         return latent_vectors
 
-    def inner_loop_metasgd(self, sampling_grid, latent_vectors, gt):
+    def inner_loop_metasgd(self, sampling_grid, latent_vectors, gt, sample_prop):
         # latent_vectors: [B, latent_dim]
         # gt: [B, H, W]
         for _ in range(self.inner_steps):
-            # 1) forward
-            ims = self.model.reconstruct_image(sampling_grid, latent_vectors)
-            loss = self.loss(ims, gt)
+            # Obtain loss either with subsampled pixels or with all pixels
+            if sample_prop is not None:
+                sub_grid, sub_gt, _ = self._sample_pixels(
+                    sampling_grid, gt, sample_prop
+                )
+                # model should produce [B, k, C] for sub_grid
+                preds = self.model.forward(sub_grid, latent_vectors)
+                loss = F.mse_loss(preds, sub_gt)
+            else:
+                ims_full = self.model.reconstruct_image(sampling_grid, latent_vectors)
+                # ims_full expected [B, C, H, W]; match gt
+                loss = self.loss(ims_full, gt)
 
             # 2) compute inner‐loop grads *as part of the graph*
             grads = torch.autograd.grad(loss, latent_vectors, create_graph=True)[0]
@@ -202,8 +252,23 @@ class latentModulatedTrainer(nn.Module):
                     )
                 else:
                     optimized_latents = self.inner_loop_metasgd(
-                        sampling_grid, nn.Parameter(latents), images
+                        sampling_grid, nn.Parameter(latents), images, self.sample_prop
                     )
+
+                # Obtain outer loss either with subsampled pixels or with all pixels
+                if self.sample_prop is not None:
+                    sub_grid, sub_gt, _ = self._sample_pixels(
+                        sampling_grid, images, self.sample_prop
+                    )
+                    # model should produce [B, k, C] for sub_grid
+                    preds = self.model.forward(sub_grid, optimized_latents)
+                    outer_loss = F.mse_loss(preds, sub_gt) / B
+                else:
+                    ims_full = self.model.reconstruct_image(
+                        sampling_grid, optimized_latents
+                    )
+                    # ims_full expected [B, C, H, W]; match gt
+                    outer_loss = self.loss(ims_full, images) / B
 
                 # Obtain final reconstructions
                 final_reconstructions = self.model.reconstruct_image(
@@ -226,11 +291,12 @@ class latentModulatedTrainer(nn.Module):
                 # Store latent vectors
                 latent_vectors_all[indices] = optimized_latents.detach().cpu()
 
-            if self.use_lr_schedule:
-                self.scheduler.step(outer_loss)
-
             # Store losses
             avg_loss = epoch_loss / n_batches
+
+            if self.use_lr_schedule:
+                self.scheduler.step(avg_loss)
+
             avg_losses.append(avg_loss)
             wandb.log({"train/avg_loss": avg_loss, "epoch": epoch})
 
@@ -239,6 +305,16 @@ class latentModulatedTrainer(nn.Module):
             if save_ckpt_flag:
                 # Log images
                 if is_best_flag:
+                    # Obtain some reconstructed images
+                    with torch.no_grad():
+                        n_samples = min(len(optimized_latents[:4]), 4)
+                        sampling_grid = get_coordinate_grid(
+                            self.resolution, batch_size=n_samples, device=self.device
+                        )
+                        final_reconstructions = self.model.reconstruct_image(
+                            sampling_grid,
+                            optimized_latents[:n_samples],
+                        )
                     # Build a grid (detach & clamp/normalize as needed)
                     grid = make_grid(
                         final_reconstructions[:4].detach().cpu(),

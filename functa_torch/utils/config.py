@@ -18,7 +18,7 @@ class ModelConfig:
     w0: float = 1.0
     modulate_scale: bool = True
     modulate_shift: bool = True
-    use_meta_sgd: bool = False
+    use_meta_sgd: bool = True
     final_activation: Optional[Literal["sigmoid"]] = None
     device: torch.device = torch.device("cuda")
 
@@ -36,6 +36,7 @@ class TrainingConfig:
     use_lr_schedule: bool = False
     normalise: Literal["01", "imagenet"] = "01"
     n_warmup_epochs: int = 500
+    sample_prop: Optional[float] = None
 
 
 @dataclass
