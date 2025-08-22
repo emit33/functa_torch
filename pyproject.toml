@@ -1,0 +1,4 @@
+[project]
+name = "functa_torch"
+version = "0.1"
+description = "A pytorch reimplementation of Google Deepmind's Functa"

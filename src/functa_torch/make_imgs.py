@@ -2,7 +2,6 @@ from typing import Iterable, Union
 from functa_torch.utils.analysis import visualise_combined
 from functa_torch.utils.config import Config
 from functa_torch.utils.nonpublic import (
-    find_matching_experiments,
     get_config_from_experiment_ind,
 )
 
@@ -26,6 +25,6 @@ def visualise_experiments_from_indices(experiment_inds: Union[int, Iterable]):
 
 
 if __name__ == "__main__":
-    experiment_numbers: Union[int, Iterable] = range(35, 42)
+    experiment_numbers: Union[int, Iterable] = range(118, 119)
 
     visualise_experiments_from_indices(experiment_numbers)
