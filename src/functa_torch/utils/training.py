@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -83,7 +83,7 @@ class latentModulatedTrainer(nn.Module):
         self.model_config = model_config
 
         # Determine resolution
-        self.resolution: int = determine_resolution(paths_config.data_dir)
+        self.resolution: List[int] = determine_resolution(paths_config.data_dir)
 
         # Obtain train loader
         self.trainloader = get_train_dataloader(
@@ -109,33 +109,49 @@ class latentModulatedTrainer(nn.Module):
 
     def _sample_pixels(
         self,
-        sampling_grid: torch.Tensor,  # [B, H, W, 2]  (or [B, H, W, dim_in])
-        images: torch.Tensor,  # [B, H, W, C]
+        sampling_grid: torch.Tensor,  # [B, *spatial, D]
+        images: torch.Tensor,  # [B, *spatial, C] or [B, C, *spatial]
         sample_prop: float,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Subsample a proportion of spatial positions (same indices for every item in batch).
 
         Returns:
-            sub_grid: [B, k, C]          sampled coordinates
-            sub_gt:   [B, k, C]          ground‑truth pixel values
-            idx:      [k]                flat indices (0..H*W-1)
+            sub_grid: [B, k, D]          sampled coordinates
+            sub_gt:   [B, k, C]          ground‑truth values
+            idx:      [k]                flat indices (0..prod(spatial)-1)
         """
-        B, H, W, coord_dim = sampling_grid.shape
-        _, H2, W2, C = images.shape
-        assert H == H2 and W == W2, "Grid and image spatial dims must match"
+        # Parse shapes
+        B, *spatial_shape, coord_dim = sampling_grid.shape
+        S = len(spatial_shape)
+        assert S >= 1, "sampling_grid must have at least one spatial dimension"
+        assert images.ndim == 2 + S, "images rank must match sampling_grid spatial rank"
 
-        N = H * W
+        # Ensure images are channels-last [B, *spatial, C]
+        if tuple(images.shape[1 : 1 + S]) == tuple(spatial_shape):
+            imgs_cl = images.contiguous()
+            C = images.shape[1 + S]
+        elif tuple(images.shape[-S:]) == tuple(spatial_shape):
+            # channels-first -> channels-last
+            C = images.shape[1]
+            perm = [0] + list(range(2, 2 + S)) + [1]  # [B, C, *S] -> [B, *S, C]
+            imgs_cl = images.permute(*perm).contiguous()
+        else:
+            raise AssertionError("Grid and image spatial dims must match")
+
+        # Flatten spatial dims
+        N = 1
+        for s in spatial_shape:
+            N *= s
         k = max(1, int(sample_prop * N))
 
         # Choose k flat spatial indices (uniform without replacement)
         idx = torch.randperm(N, device=sampling_grid.device)[:k]  # [k]
 
-        # Flatten spatial dims
-        grid_flat = sampling_grid.view(B, N, coord_dim)  # [B, N, 2]
-        imgs_flat = images.view(B, N, C)  # [B, N, C]
+        grid_flat = sampling_grid.view(B, N, coord_dim)  # [B, N, D]
+        imgs_flat = imgs_cl.view(B, N, C)  # [B, N, C]
 
-        sub_grid = grid_flat[:, idx]  # [B, k, 2]
+        sub_grid = grid_flat[:, idx]  # [B, k, D]
         sub_gt = imgs_flat[:, idx]  # [B, k, C]
 
         return sub_grid, sub_gt, idx
@@ -269,17 +285,6 @@ class latentModulatedTrainer(nn.Module):
                     )
                     # ims_full expected [B, C, H, W]; match gt
                     outer_loss = self.loss(ims_full, images) / B
-
-                # Obtain final reconstructions
-                final_reconstructions = self.model.reconstruct_image(
-                    sampling_grid,
-                    optimized_latents,
-                )
-
-                outer_loss = (
-                    self.loss(final_reconstructions, images, self.model.parameters())
-                    / B
-                )
 
                 # Update model parameters (not latent vector)
                 outer_loss.backward()

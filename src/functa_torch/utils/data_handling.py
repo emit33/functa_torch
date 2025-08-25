@@ -1,14 +1,13 @@
 from pathlib import Path
-from typing import Literal
+from typing import List, Literal
 import torch
 from torch.utils.data import Dataset, DataLoader
 
 
-def determine_resolution(data_dir: Path) -> int:
-    imgs = torch.load(data_dir / "imgs.pt")  # Shape: (num_imgs, H, W, C)
-    assert imgs.shape[-2] == imgs.shape[-3], "Currently require square images"
+def determine_resolution(data_dir: Path) -> List[int]:
+    imgs = torch.load(data_dir / "imgs.pt")  # Shape: (num_imgs, *query_dimensions, C)
 
-    resolution = imgs.shape[-2]
+    resolution = list(imgs.shape[1:-1])
     return resolution
 
 

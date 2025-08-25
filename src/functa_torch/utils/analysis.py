@@ -4,7 +4,7 @@ from pathlib import Path
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
-from typing import Optional
+from typing import List, Optional
 
 from functa_torch.utils.helpers import get_coordinate_grid
 from functa_torch.utils.siren import LatentModulatedSiren
@@ -25,7 +25,7 @@ def get_last_checkpoint_path(checkpoint_dir):
 
 def get_imgs_from_functa_ckpt(
     ckpt_path: str | Path,
-    resolution: int = 256,
+    resolution: List[int] = [128, 128],
     n=9,
     bs=15,
     device="cuda",
@@ -66,7 +66,11 @@ def get_imgs_from_functa_ckpt(
 
 
 def reconstruct_images_from_latents(
-    latent_vecs: torch.Tensor, ckpt_path, resolution: int = 64, device="cuda", bs=40
+    latent_vecs: torch.Tensor,
+    ckpt_path,
+    resolution: List[int] = [64, 64],
+    device="cuda",
+    bs=40,
 ) -> np.ndarray:
     # Ensure latent_vecs is of shape n_samples x latent_dim:
     if len(latent_vecs.shape) == 1:
