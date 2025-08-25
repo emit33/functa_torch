@@ -2,3 +2,13 @@
 name = "functa_torch"
 version = "0.1"
 description = "A pytorch reimplementation of Google Deepmind's Functa"
+
+[project.scripts]
+functa-train = "functa_torch.run_experiment_with_args:main"
+
+# Tell setuptools to find packages under src/
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
