@@ -97,43 +97,31 @@ class latentModulatedTrainer(nn.Module):
         training_config: TrainingConfig,
         paths_config: PathConfig,
         other_config: OtherConfig,
-        ckpt_path: Optional[str | Path] = None,
     ):
         super().__init__()
-        # Store configs
+
+        # 1) Store configs
         self.model_config = model_config
         self.training_config = training_config
         self.paths_config = paths_config
         self.other_config = other_config
-
-        # Create model
-        model_config.dim_out = determine_dim_out(paths_config.data_dir)
-        self.model: LatentModulatedSiren = LatentModulatedSiren(**asdict(model_config))
-        # Move model to device early to avoid host/device mismatches
         self.device: torch.device = model_config.device
-        self.model.to(self.device)
 
-        # Load in checkpoint, if given
-        if ckpt_path is not None:
-            ckpt = torch.load(ckpt_path, weights_only=False)
-            self.model.load_state_dict(ckpt["model_state_dict"])
-
-        # Paths
+        # 2) Paths / checkpoint dir
         self.checkpoint_dir: Path = paths_config.checkpoints_dir
-        paths_config.checkpoints_dir
         os.makedirs(self.checkpoint_dir, exist_ok=True)
 
-        # Store some training hparams directly in self
-        self.inner_steps: int = training_config.inner_steps
-        self.n_epochs: int = training_config.n_epochs
-        self.save_ckpt_step: Optional[int] = other_config.save_ckpt_step
-        self.use_lr_schedule: bool = training_config.use_lr_schedule
-        self.sample_prop: Optional[float] = training_config.sample_prop
-
-        # Determine resolution
+        # 3) Dataset-dependent metadata
+        self.model_config.dim_out = determine_dim_out(paths_config.data_dir)
         self.resolution: List[int] = determine_resolution(paths_config.data_dir)
 
-        # Obtain train loader
+        # 4) Build model and move to device
+        self.model: LatentModulatedSiren = LatentModulatedSiren(
+            **asdict(self.model_config)
+        )
+        self.model.to(self.device)
+
+        # 5) DataLoader
         self.trainloader = get_train_dataloader(
             paths_config.data_dir,
             training_config.batch_size,
@@ -141,23 +129,34 @@ class latentModulatedTrainer(nn.Module):
             normalise=training_config.normalise,
         )
 
-        # Initialise training functions
+        # 6) Training components: loss, optimizer, scheduler
         self.loss: image_loss = image_loss(training_config.l2_weight)
         self.outer_optimizer = torch.optim.Adam(
             self.model.parameters(), lr=training_config.outer_lr
         )
-
-        # Load in checkpoint, if given
-        if ckpt_path is not None:
-            self.outer_optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-
+        self.use_lr_schedule: bool = training_config.use_lr_schedule
         if self.use_lr_schedule:
             self.scheduler = ReduceLROnPlateau(
                 self.outer_optimizer,
-                "min",
+                mode="min",
                 patience=500,
                 factor=0.7,
             )
+
+        # 7) Frequently accessed hparams
+        self.inner_steps: int = training_config.inner_steps
+        self.n_epochs: int = training_config.n_epochs
+        self.save_ckpt_step: Optional[int] = other_config.save_ckpt_step
+        self.sample_prop: Optional[float] = training_config.sample_prop
+
+        # 8) Optional checkpoint restore (model + optimizer)
+        if paths_config.ckpt_path is not None:
+            ckpt = torch.load(
+                paths_config.ckpt_path, map_location=self.device, weights_only=False
+            )
+
+            self.model.load_state_dict(ckpt["model_state_dict"])
+            self.outer_optimizer.load_state_dict(ckpt["optimizer_state_dict"])
 
     def _sample_pixels(
         self,
@@ -208,9 +207,7 @@ class latentModulatedTrainer(nn.Module):
 
         return sub_grid, sub_gt, idx
 
-    def determine_save_ckpt(
-        self, epoch: int, avg_losses: List[float], checkpoint_dir: Path
-    ) -> Path | None:
+    def determine_save_ckpt(self, epoch: int, checkpoint_dir: Path) -> Path | None:
         """
         Decide whether to save a checkpoint.
         """
@@ -221,7 +218,7 @@ class latentModulatedTrainer(nn.Module):
             and epoch % self.save_ckpt_step == 0
         ):
 
-            return self.checkpoint_dir / f"checkpoint_epoch_{epoch}.pth"
+            return checkpoint_dir / f"checkpoint_epoch_{epoch}.pth"
         else:
             return None
 
@@ -384,7 +381,7 @@ class latentModulatedTrainer(nn.Module):
             wandb.log({"train/avg_loss": avg_loss, "epoch": epoch})
 
             # Save model and latent vectors according to save_ckpt_step
-            save_path = self.determine_save_ckpt(epoch, avg_losses, self.checkpoint_dir)
+            save_path = self.determine_save_ckpt(epoch, self.checkpoint_dir)
             if save_path is not None:
 
                 torch.save(

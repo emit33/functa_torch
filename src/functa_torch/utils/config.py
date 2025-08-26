@@ -45,6 +45,7 @@ class PathConfig:
     checkpoints_dir: Path
     experiment_dir: Path
     figs_dir: Path
+    ckpt_path: Optional[Path]
 
 
 @dataclass
