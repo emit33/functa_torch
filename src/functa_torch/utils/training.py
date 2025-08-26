@@ -1,6 +1,15 @@
+"""
+Training utilities for latent-modulated SIREN models.
+
+This module provides:
+- A simple image loss with optional L2 regularization.
+- A trainer for latent-modulated SIREN models supporting both SGD and Meta-SGD inner loops.
+- Utilities to sample subsets of pixels to reduce inner/outer loop compute.
+"""
+
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Iterable
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,7 +17,6 @@ from dataclasses import asdict
 from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import wandb
-from torchvision.utils import make_grid
 
 from functa_torch.utils.helpers import get_coordinate_grid, initialise_latent_vector
 from functa_torch.utils.data_handling import (
@@ -26,15 +34,39 @@ from functa_torch.utils.siren import LatentModulatedSiren
 
 
 class image_loss(nn.Module):
-    def __init__(self, l2_weight):
+    """
+    MSE reconstruction loss with optional L2 parameter regularization.
+
+    Notes:
+    - Regularization is averaged by the number of parameters for scale stability.
+    - Pass `params` to enable the L2 term; otherwise only the MSE term is used.
+    """
+
+    def __init__(self, l2_weight: float):
         super().__init__()
         self.l2_weight = l2_weight
 
-    def forward(self, reconstructed, gt, params=None):
+    def forward(
+        self,
+        reconstructed: torch.Tensor,  # [B, ...spatial..., C]
+        gt: torch.Tensor,  # shape compatible with `reconstructed`
+        params: Optional[Iterable[nn.Parameter]] = None,
+    ) -> torch.Tensor:
+        """
+        Compute reconstruction loss (MSE) and optional L2 penalty.
+
+        Args:
+            reconstructed: Model predictions.
+            gt: Ground truth tensor with matching shape.
+            params: Iterable of parameters to regularize (e.g. model.parameters()).
+                    Accepts any iterable of nn.Parameter.
+        Returns:
+            Scalar loss tensor.
+        """
         # Reconstruction loss
         loss = F.mse_loss(reconstructed, gt)
 
-        # L2 norm of parameters
+        # Optional L2 regularization over provided params
         if params is not None:
             total_params = sum(p.numel() for p in params)
             l2_reg = sum(torch.sum(p**2) for p in params) / total_params
@@ -48,39 +80,55 @@ class image_loss(nn.Module):
 
 
 class latentModulatedTrainer(nn.Module):
+    """
+    Trainer for LatentModulatedSiren with two-stage optimization:
+    - Inner loop optimizes per-image latent vectors (SGD or Meta‑SGD).
+    - Outer loop updates the model parameters (ie the shared linear layer parameters, as well as the linear layers to convert a latent vector to a tensor of all modulations).
+
+    Optional Training Tricks:
+    - Image subsampling: do not use all pixels in each image within the supervised, but only a random proportion. These proportions are sampled separately for the inner- and outer- optimisations. Permits much faster training, but training tends to perform worse.
+    - Learning rate scheduling: apply learning rate scheduling on outer learning rate (Reduce on Plateau). Requires very large patiences and/or small changes in learning rate to not worsen performance
+    - Final activation choice: I didn't find a major difference in performance between sigmoid activation and identity activation.
+    """
+
     def __init__(
         self,
         model_config: ModelConfig,
         training_config: TrainingConfig,
         paths_config: PathConfig,
         other_config: OtherConfig,
+        ckpt_path: Optional[str | Path] = None,
     ):
         super().__init__()
+        # Store configs
+        self.model_config = model_config
+        self.training_config = training_config
+        self.paths_config = paths_config
+        self.other_config = other_config
+
+        # Create model
         model_config.dim_out = determine_dim_out(paths_config.data_dir)
         self.model: LatentModulatedSiren = LatentModulatedSiren(**asdict(model_config))
+        # Move model to device early to avoid host/device mismatches
+        self.device: torch.device = model_config.device
+        self.model.to(self.device)
+
+        # Load in checkpoint, if given
+        if ckpt_path is not None:
+            ckpt = torch.load(ckpt_path, weights_only=False)
+            self.model.load_state_dict(ckpt["model_state_dict"])
 
         # Paths
         self.checkpoint_dir: Path = paths_config.checkpoints_dir
+        paths_config.checkpoints_dir
         os.makedirs(self.checkpoint_dir, exist_ok=True)
 
-        # Training hparams
-        self.use_meta_sgd: bool = model_config.use_meta_sgd
-        self.latent_dim: int = model_config.latent_dim
-        self.latent_init_scale: float = training_config.latent_init_scale
-        self.outer_lr: float = training_config.outer_lr
-        self.inner_lr: float = training_config.inner_lr
-        self.l2_weight: float = training_config.l2_weight
+        # Store some training hparams directly in self
         self.inner_steps: int = training_config.inner_steps
-        self.batch_size: int = training_config.batch_size
         self.n_epochs: int = training_config.n_epochs
         self.save_ckpt_step: Optional[int] = other_config.save_ckpt_step
         self.use_lr_schedule: bool = training_config.use_lr_schedule
-        self.n_warmup_epochs: int = training_config.n_warmup_epochs
         self.sample_prop: Optional[float] = training_config.sample_prop
-
-        # Further states
-        self.device: torch.device = model_config.device
-        self.model_config = model_config
 
         # Determine resolution
         self.resolution: List[int] = determine_resolution(paths_config.data_dir)
@@ -88,16 +136,20 @@ class latentModulatedTrainer(nn.Module):
         # Obtain train loader
         self.trainloader = get_train_dataloader(
             paths_config.data_dir,
-            self.batch_size,
+            training_config.batch_size,
             tensor_data=training_config.tensor_data,
             normalise=training_config.normalise,
         )
 
         # Initialise training functions
-        self.loss: image_loss = image_loss(self.l2_weight)
+        self.loss: image_loss = image_loss(training_config.l2_weight)
         self.outer_optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.outer_lr
+            self.model.parameters(), lr=training_config.outer_lr
         )
+
+        # Load in checkpoint, if given
+        if ckpt_path is not None:
+            self.outer_optimizer.load_state_dict(ckpt["optimizer_state_dict"])
 
         if self.use_lr_schedule:
             self.scheduler = ReduceLROnPlateau(
@@ -117,9 +169,9 @@ class latentModulatedTrainer(nn.Module):
         Subsample a proportion of spatial positions (same indices for every item in batch).
 
         Returns:
-            sub_grid: [B, k, D]          sampled coordinates
-            sub_gt:   [B, k, C]          ground‑truth values
-            idx:      [k]                flat indices (0..prod(spatial)-1)
+            sub_grid: [B, k, D]   sampled coordinates
+            sub_gt:   [B, k, C]   ground‑truth values (channels-last)
+            idx:      [k]         flat indices (0..prod(spatial)-1)
         """
         # Parse shapes
         B, *spatial_shape, coord_dim = sampling_grid.shape
@@ -156,7 +208,12 @@ class latentModulatedTrainer(nn.Module):
 
         return sub_grid, sub_gt, idx
 
-    def determine_save_ckpt(self, epoch: int, avg_losses) -> tuple[bool, bool]:
+    def determine_save_ckpt(
+        self, epoch: int, avg_losses: List[float], checkpoint_dir: Path
+    ) -> Path | None:
+        """
+        Decide whether to save a checkpoint.
+        """
         # Check if checkpoint should be saved due to being regular
         if epoch == self.n_epochs - 1 or (
             self.save_ckpt_step is not None
@@ -164,26 +221,37 @@ class latentModulatedTrainer(nn.Module):
             and epoch % self.save_ckpt_step == 0
         ):
 
-            return True, False
-
-        if (epoch > self.n_warmup_epochs) and (
-            avg_losses[-1] < (0.9 * min(avg_losses[:-1]))
-        ):
-            return True, True
-
+            return self.checkpoint_dir / f"checkpoint_epoch_{epoch}.pth"
         else:
-            return False, False
+            return None
+
+        # Optional expansion: save also if the model is the 'best' under a different path
 
     def inner_loop_sgd(
-        self, sampling_grid, latent_vectors, gt, sample_prop: Optional[float] = None
-    ):
-        # latent_vectors: [B, latent_dim]
-        # gt: [B, H, W]
-        optimizer = torch.optim.SGD([latent_vectors], lr=self.inner_lr)
+        self,
+        sampling_grid: torch.Tensor,  # [B, *spatial, D]
+        latent_vectors: nn.Parameter,  # [B, latent_dim]
+        gt: torch.Tensor,  # [B, *spatial, C]
+        sample_prop: Optional[float] = None,
+    ) -> torch.Tensor:
+        """
+        Inner loop with vanilla SGD on the per-image latent vectors only.
+
+        Args:
+            sampling_grid: Coordinate grid for reconstruction.
+            latent_vectors: Trainable latent vectors (one per batch item).
+            gt: Ground truth images.
+            sample_prop: If set, subsample this proportion of pixels per step.
+
+        Returns:
+            Optimized latent vectors with gradients detached from inner optimizer.
+        """
+        optimizer = torch.optim.SGD([latent_vectors], lr=self.training_config.inner_lr)
 
         for _ in range(self.inner_steps):
             optimizer.zero_grad()
-            # Obtain loss either with subsampled pixels or with all pixels
+
+            # Compute inner-loop loss from subsampled pixels or full image
             if sample_prop is not None:
                 sub_grid, sub_gt, _ = self._sample_pixels(
                     sampling_grid, gt, sample_prop
@@ -193,7 +261,6 @@ class latentModulatedTrainer(nn.Module):
                 loss = F.mse_loss(preds, sub_gt)
             else:
                 ims_full = self.model.reconstruct_image(sampling_grid, latent_vectors)
-                # ims_full expected [B, C, H, W]; match gt
                 loss = self.loss(ims_full, gt)
 
             # Update latent vectors
@@ -202,11 +269,20 @@ class latentModulatedTrainer(nn.Module):
 
         return latent_vectors
 
-    def inner_loop_metasgd(self, sampling_grid, latent_vectors, gt, sample_prop):
-        # latent_vectors: [B, latent_dim]
-        # gt: [B, H, W]
+    def inner_loop_metasgd(
+        self,
+        sampling_grid: torch.Tensor,  # [B, *spatial, D]
+        latent_vectors: torch.Tensor,  # [B, latent_dim]
+        gt: torch.Tensor,  # [B, *spatial, C]
+        sample_prop: Optional[float],
+    ) -> torch.Tensor:
+        """
+        Inner loop with Meta‑SGD updates on the per-image latent vectors.
+
+        The update uses learned per-parameter learning rates stored in the model.
+        """
         for _ in range(self.inner_steps):
-            # Obtain loss either with subsampled pixels or with all pixels
+            # Compute inner-loop loss from subsampled pixels or full image
             if sample_prop is not None:
                 sub_grid, sub_gt, _ = self._sample_pixels(
                     sampling_grid, gt, sample_prop
@@ -216,22 +292,26 @@ class latentModulatedTrainer(nn.Module):
                 loss = F.mse_loss(preds, sub_gt)
             else:
                 ims_full = self.model.reconstruct_image(sampling_grid, latent_vectors)
-                # ims_full expected [B, C, H, W]; match gt
                 loss = self.loss(ims_full, gt)
 
-            # 2) compute inner‐loop grads *as part of the graph*
+            # Compute inner‑loop grads as part of the graph
             grads = torch.autograd.grad(loss, latent_vectors, create_graph=True)[0]
 
-            # Obtain lrs and update latent_vectors
-            lrs = self.model.meta_sgd_lrs.meta_sgd_lrs.unsqueeze(0)
+            # Meta‑SGD update with learned per-parameter LRs
+            lrs = self.model.meta_sgd_lrs.meta_sgd_lrs.unsqueeze(0)  # [1, latent_dim]
             latent_vectors = latent_vectors - lrs * grads
 
         return latent_vectors
 
-    def train(self):
+    def train(self) -> None:
+        """
+        Run training across epochs.
+        """
         n_batches = len(self.trainloader)
         n_imgs = len(self.trainloader.dataset)  # type: ignore
         avg_losses = []
+
+        self.model.train()
 
         pbar = tqdm(range(self.n_epochs), desc="Epoch", ncols=80)
         for epoch in pbar:
@@ -242,15 +322,14 @@ class latentModulatedTrainer(nn.Module):
 
             for batch in self.trainloader:
                 # Load batch
-                images, indices = batch
+                images, indices = batch  # images: [B, *spatial, C]
                 B = len(indices)
-
-                images = images.to(self.device, non_blocking=True)  # [bs,C,H,W]
+                images = images.to(self.device, non_blocking=True)
 
                 # Initialise latents and sampling grid
                 latents = initialise_latent_vector(
-                    self.latent_dim,
-                    self.latent_init_scale,
+                    self.model_config.latent_dim,
+                    self.training_config.latent_init_scale,
                     self.device,
                     batch_size=B,
                 )
@@ -258,11 +337,11 @@ class latentModulatedTrainer(nn.Module):
                     self.resolution, batch_size=B, device=self.device
                 )
 
-                # Zero gradients
+                # Zero gradients (outer loop)
                 self.outer_optimizer.zero_grad()
 
-                # Find appropriate latent vectors for these batch elements using N_inner optimizer steps.
-                if not self.use_meta_sgd:
+                # Find per-batch latent vectors via N_inner optimizer steps (with Meta_SGD)
+                if not self.model_config.use_meta_sgd:
                     optimized_latents = self.inner_loop_sgd(
                         sampling_grid, nn.Parameter(latents), images
                     )
@@ -271,7 +350,7 @@ class latentModulatedTrainer(nn.Module):
                         sampling_grid, nn.Parameter(latents), images, self.sample_prop
                     )
 
-                # Obtain outer loss either with subsampled pixels or with all pixels
+                # Outer loss on subsampled pixels or full image
                 if self.sample_prop is not None:
                     sub_grid, sub_gt, _ = self._sample_pixels(
                         sampling_grid, images, self.sample_prop
@@ -283,7 +362,6 @@ class latentModulatedTrainer(nn.Module):
                     ims_full = self.model.reconstruct_image(
                         sampling_grid, optimized_latents
                     )
-                    # ims_full expected [B, C, H, W]; match gt
                     outer_loss = self.loss(ims_full, images) / B
 
                 # Update model parameters (not latent vector)
@@ -306,40 +384,8 @@ class latentModulatedTrainer(nn.Module):
             wandb.log({"train/avg_loss": avg_loss, "epoch": epoch})
 
             # Save model and latent vectors according to save_ckpt_step
-            save_ckpt_flag, is_best_flag = self.determine_save_ckpt(epoch, avg_losses)
-            if save_ckpt_flag:
-                # Log images
-                if is_best_flag:
-                    # Obtain some reconstructed images
-                    with torch.no_grad():
-                        n_samples = min(len(optimized_latents[:4]), 4)
-                        sampling_grid = get_coordinate_grid(
-                            self.resolution, batch_size=n_samples, device=self.device
-                        )
-                        final_reconstructions = self.model.reconstruct_image(
-                            sampling_grid,
-                            optimized_latents[:n_samples],
-                        )
-                    # Build a grid (detach & clamp/normalize as needed)
-                    grid = make_grid(
-                        final_reconstructions[:4].detach().cpu(),
-                        nrow=4,
-                    )
-
-                    wandb.log(
-                        {
-                            "best/recon_samples": wandb.Image(
-                                grid, caption=f"epoch {epoch}"
-                            ),
-                            "epoch": epoch,
-                        }
-                    )
-
-                save_path = (
-                    self.checkpoint_dir / f"checkpoint_best"
-                    if is_best_flag
-                    else self.checkpoint_dir / f"checkpoint_epoch_{epoch}.pth"
-                )
+            save_path = self.determine_save_ckpt(epoch, avg_losses, self.checkpoint_dir)
+            if save_path is not None:
 
                 torch.save(
                     {
