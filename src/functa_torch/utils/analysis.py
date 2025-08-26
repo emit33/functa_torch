@@ -1,6 +1,7 @@
 import math
 import os
 from pathlib import Path
+import re
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
@@ -13,8 +14,11 @@ from functa_torch.utils.siren import LatentModulatedSiren
 def get_last_checkpoint_path(checkpoint_dir):
     """Get the last checkpoint file in the directory."""
 
-    # Sort files by modification time
     ckpts = os.listdir(checkpoint_dir)
+
+    # Filter to only those ending in a number
+    ckpts = [f for f in ckpts if re.search(r"_\d+\.pth$", f)]
+
     ckpts.sort(key=lambda f: int(f.split("_")[-1].removesuffix(".pth")))
 
     if not ckpts:
@@ -146,13 +150,15 @@ def visualise_loss(ckpt_dir, img_save_path=None):
     plt.show()
 
 
-def visualise_combined(ckpt_dir, save_path, n=9, ncols=3, cmap="gray", dpi=300):
+def visualise_combined(
+    ckpt_dir, save_path, resolution, n=9, ncols=3, cmap="gray", dpi=300
+):
     """
     One figure: top = n reconstructions in a grid, bottom = loss vs epoch.
     """
     # 1) load data
     ckpt_path = get_last_checkpoint_path(ckpt_dir)
-    reconstructions = get_imgs_from_functa_ckpt(ckpt_path, n=n)
+    reconstructions = get_imgs_from_functa_ckpt(ckpt_path, n=n, resolution=resolution)
     losses = torch.load(ckpt_path)["avg_losses"]
 
     # 2) compute grid layout

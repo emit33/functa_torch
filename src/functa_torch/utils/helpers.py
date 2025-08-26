@@ -1,12 +1,15 @@
+"""Helper utilities for building coordinate grids, partitioning params, and latents."""
+
 import os
 import sys
+from pathlib import Path
 from typing import List, Optional, Sequence, Union
 import torch
 from torch import Tensor
 import torch.nn as nn
 
 
-def get_coordinate_grid_nd(
+def get_coordinate_grid(
     res: List[int],
     centered: bool = True,
     batch_size: Optional[int] = None,
@@ -15,11 +18,10 @@ def get_coordinate_grid_nd(
     """Returns a normalized ND coordinate grid.
 
     Args:
-      res: Either an int (treated as 2D square: [res, res]) or a sequence of per-dimension
-           sizes in the desired order, e.g. [T, Y, X] or [Z, Y, X].
-      centered: If True, coordinates lie at cell centers (align_corners=False equivalent).
-      batch_size: If provided, prepends a batch dimension and expands without copying.
-      device: Torch device for the output.
+        res: A sequence of per-dimension sizes in the desired order, e.g. [T, X, Y] or [X, Y].
+        centered: If True, coordinates lie at cell centers (align_corners=False equivalent).
+        batch_size: If provided, prepends a batch dimension and expands without copying.
+        device: Torch device for the output tensor.
 
     Returns:
       Tensor of shape (*res, D) or (B, *res, D) if batch_size is not None,
@@ -49,29 +51,21 @@ def get_coordinate_grid_nd(
     return grid
 
 
-def get_coordinate_grid(
-    res: List[int],
-    centered: bool = True,
-    batch_size=None,
-    device: torch.device = torch.device("cuda"),
-) -> Tensor:
-    """Backward-compatible 2D wrapper around get_coordinate_grid_nd."""
-    return get_coordinate_grid_nd(
-        res, centered=centered, batch_size=batch_size, device=device
-    )
+def partition_params(model: nn.Module) -> tuple[list[nn.Parameter], list[nn.Parameter]]:
+    """Partition model parameters into shared vs image-specific parameters.
 
-
-def partition_params(model):
-    """Partition model parameters into image-specific and shared parameters.
+    Heuristic:
+    - Parameters whose names contain 'latent_vector' or 'FiLM' are treated as image-specific.
+    - All others are treated as shared.
 
     Args:
-        model: PyTorch model with named parameters
+        model: PyTorch module.
 
     Returns:
-        tuple: (shared_params, image_specific_params) as lists of parameters
+        (shared_params, image_specific_params)
     """
-    shared_params = []
-    image_specific_params = []
+    shared_params: list[nn.Parameter] = []
+    image_specific_params: list[nn.Parameter] = []
 
     for name, param in model.named_parameters():
         if "latent_vector" in name or "FiLM" in name:
@@ -83,14 +77,24 @@ def partition_params(model):
 
 
 def initialise_latent_vector(
-    latent_dim,
-    latent_init_scale,
-    device,
-    batch_size=None,
-):
-    # Initialize latent vector and map from latents to modulations.
-    latent_vector = torch.rand(latent_dim, device=device)  # Uniform[0, 1]
+    latent_dim: int,
+    latent_init_scale: float,
+    device: torch.device,
+    batch_size: Optional[int] = None,
+) -> Tensor:
+    """Initialize latent vector(s) uniformly in [-latent_init_scale, +latent_init_scale].
 
+    Args:
+        latent_dim: Size of the latent vector per item.
+        latent_init_scale: Range half-width for uniform init.
+        device: Target device.
+        batch_size: If provided, returns [B, latent_dim]; else [latent_dim].
+
+    Returns:
+        Tensor of shape [latent_dim] or [B, latent_dim], dtype float32.
+    """
+    # Initialize latent vector and map from latents to modulations.
+    latent_vector = torch.rand(latent_dim, device=device, dtype=torch.float32)  # U[0,1]
     # Rescale to [-latent_init_scale, latent_init_scale]
     latent_vector = 2 * latent_init_scale * latent_vector - latent_init_scale
 
@@ -101,8 +105,17 @@ def initialise_latent_vector(
     return latent_vector
 
 
-def check_for_checkpoints(checkpoint_dir):
-    if os.path.exists(checkpoint_dir):
+def check_for_checkpoints(checkpoint_dir: Union[str, os.PathLike, Path]) -> None:
+    """Prompt before reusing an existing checkpoint directory; exit if declined.
+
+    Args:
+        checkpoint_dir: Directory path to check.
+
+    Side effects:
+        May call sys.exit(0) if user answers 'n'.
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+    if checkpoint_dir.exists():
         while True:
             resp = input(
                 f"Checkpoint directory {checkpoint_dir} already exists. Proceed? [y/n]: "
@@ -110,7 +123,7 @@ def check_for_checkpoints(checkpoint_dir):
             resp = resp.strip().lower()
             if resp == "y":
                 break
-            if resp == "no":
+            if resp == "n":
                 print("Aborting.")
                 sys.exit(0)
             print("Please enter 'y' or 'n'.")

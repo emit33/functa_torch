@@ -1,4 +1,4 @@
-from ctypes import Array
+"""SIREN layers and latent-modulated SIREN model with FiLM-based modulations."""
 from typing import Callable, Dict, Literal, Optional, Tuple
 import einops
 import torch
@@ -10,12 +10,11 @@ import numpy as np
 
 class MetaSGDLrs(nn.Module):
     """
-    Module storing learning rates for meta-sgd.
+    Container for per-parameter learning rates used by Meta-SGD.
 
     Notes:
-    This module does not apply any transformation but simply stores the learning
-    rates. Since we also learn the learning rates we treat them the same as
-    model params.
+    - This module only stores learnable LR parameters (nn.Parameter) so they are
+      optimized with the outer optimizer just like other model weights.
     """
 
     def __init__(
@@ -24,23 +23,19 @@ class MetaSGDLrs(nn.Module):
         lrs_init_range: Tuple[float, float] = (0.005, 0.1),
         lrs_clip_range: Tuple[float, float] = (-5.0, 5.0),
     ):
-        """Constructor.
-
+        """
         Args:
-        num_lrs: Number of learning rates to learn.
-        lrs_init_range: Range from which initial learning rates will be
-            uniformly sampled.
-        lrs_clip_range: Range at which to clip learning rates. Default value will
-            effectively avoid any clipping, but typically learning rates should
-            be positive and small.
+            num_lrs: Number of learning rates to learn (equals latent_dim).
+            lrs_init_range: Uniform range for initializing the LRs.
+            lrs_clip_range: Suggested clipping range for LRs (not applied here).
         """
         super().__init__()
         self.num_lrs = num_lrs
         self.lrs_init_range = lrs_init_range
         self.lrs_clip_range = lrs_clip_range
 
-        # Initialize learning rates
-        meta_sgd_lrs = (  # Initialise via sampling Uniform[0,1]
+        # Initialize learning rates ~ U[lrs_init_range[0], lrs_init_range[1]]
+        meta_sgd_lrs = (
             torch.rand(num_lrs) * (lrs_init_range[1] - lrs_init_range[0])
             + lrs_init_range[0]
         )
@@ -53,7 +48,7 @@ class Sine(nn.Module):
     def __init__(self, w0: float = 1.0):
         """
         Args:
-          w0 (float): Scale factor in sine activation (omega_0 factor from SIREN).
+            w0: Scale factor (omega_0) in the SIREN activation.
         """
         super().__init__()
         self.w0 = w0
@@ -63,7 +58,8 @@ class Sine(nn.Module):
 
 
 class FiLM(nn.Module):
-    """Applies a FiLM modulation: out = scale * in + shift.
+    """
+    FiLM modulation: out = scale * in + shift.
 
     Notes:
       We currently initialize FiLM layers as the identity. However, this may not
@@ -71,12 +67,14 @@ class FiLM(nn.Module):
       normal.
     """
 
-    def __init__(self, dim_in, modulate_scale=True, modulate_shift=True):
-        """Constructor.
-
+    def __init__(
+        self, dim_in: int, modulate_scale: bool = True, modulate_shift: bool = True
+    ):
+        """
         Args:
-          modulate_shift (bool): Whether to apply a shift modulation.
-          modulate_scale (bool): Whether to apply a scale modulation.
+            dim_in: Feature dimension to modulate.
+            modulate_scale: Whether to learn multiplicative modulation.
+            modulate_shift: Whether to learn additive modulation.
         """
         super().__init__()
         self.dim_in = dim_in
@@ -98,10 +96,8 @@ class FiLM(nn.Module):
 
 
 class ModulatedSirenLayer(nn.Module):
-    """A modulated SIREN layer.
-
-    This layer applies a Sine activation to the input, and modulates it with
-    FiLM parameters.
+    """
+    A single SIREN layer with optional FiLM modulation and optional sine activation.
     """
 
     def __init__(
@@ -109,23 +105,22 @@ class ModulatedSirenLayer(nn.Module):
         dim_in: int,
         dim_out: int,
         w0: float = 1.0,
-        is_first=False,
-        is_last=False,
+        is_first: bool = False,
+        is_last: bool = False,
         modulate_shift: bool = True,
         modulate_scale: bool = True,
         apply_activation: bool = True,
     ):
-        """Constructor.
-
+        """
         Args:
-        f_in (int): Number of input features.
-        f_out (int): Number of output features.
-        w0 (float): Scale factor in sine activation.
-        is_first (bool): Whether this is first layer of model.
-        is_last (bool): Whether this is last layer of model.
-        modulate_scale: If True, modulates scales.
-        modulate_shift: If True, modulates shifts.
-        apply_activation: If True, applies sine activation.
+            dim_in: Number of input features.
+            dim_out: Number of output features.
+            w0: SIREN omega_0 factor used in weight init and Sine activation.
+            is_first: Whether this is the first layer of the model.
+            is_last: Whether this is the last layer of the model.
+            modulate_scale: If True, apply scale modulation.
+            modulate_shift: If True, apply shift modulation.
+            apply_activation: If True, apply sine activation.
         """
         super().__init__()
         self.dim_in = dim_in
@@ -137,7 +132,7 @@ class ModulatedSirenLayer(nn.Module):
         self.modulate_shift = modulate_shift
         self.apply_activation = apply_activation
 
-        # Define option modulation and activations
+        # Optional modulation and activation
         if modulate_scale or modulate_shift:
             self.modulation = FiLM(dim_in, modulate_scale, modulate_shift)
 
@@ -156,116 +151,41 @@ class ModulatedSirenLayer(nn.Module):
         self.bias = nn.Parameter(bias)
 
     def forward(self, x: Tensor) -> Tensor:
+        """
+        Args:
+            x: [..., dim_in] input features.
+
+        Returns:
+            [..., dim_out] output features; if is_last=True, a 0.5 shift is added.
+        """
         x = F.linear(x, self.weight, self.bias)
 
         if self.is_last:
-            # We assume target data (e.g. RGB values of pixels) lies in [0, 1]. To
-            # learn zero-centered features we therefore shift output by .5
+            # Assuming targets in [0, 1], shift by 0.5 to learn zero-centered features.
             return x + 0.5
 
-        # Optionally apply modulation
+        # Optional FiLM modulation then sine activation
         if self.modulate_scale or self.modulate_shift:
             x = self.modulation(x)
-
-        # Optionally apply activation
         if self.apply_activation:
             x = self.activation(x)
 
         return x
 
 
-class ModulatedSiren(nn.Module):
-    """SIREN model with FiLM modulations as in pi-GAN."""
-
-    def __init__(
-        self,
-        width: int = 256,
-        depth: int = 5,
-        dim_in: int = 3,
-        dim_out: int = 3,
-        w0: float = 1.0,
-        modulate_scale: bool = True,
-        modulate_shift: bool = True,
-        use_meta_sgd: bool = False,
-    ):
-        super().__init__()
-        self.width = width
-        self.depth = depth
-        self.dim_in = dim_in
-        self.dim_out = dim_out
-        self.w0 = w0
-        self.modulate_scale = modulate_scale
-        self.modulate_shift = modulate_shift
-
-        if use_meta_sgd:
-            raise NotImplementedError("Meta SGD not yet implemented")
-
-        if depth < 3:
-            raise ValueError("Depth must be >=3 to permit at least one hidden layer.")
-
-        self.layers = self._construct_layers()
-
-    def _construct_layers(self):
-        layers = []
-
-        # First layer
-        layers.append(
-            ModulatedSirenLayer(
-                dim_in=self.dim_in,
-                dim_out=self.width,
-                w0=self.w0,
-                is_first=True,
-                modulate_scale=self.modulate_scale,
-                modulate_shift=self.modulate_shift,
-            )
-        )
-
-        # Hidden layers
-        for _ in range(self.depth - 2):
-            layers.append(
-                ModulatedSirenLayer(
-                    dim_in=self.width,
-                    dim_out=self.width,
-                    w0=self.w0,
-                    modulate_scale=self.modulate_scale,
-                    modulate_shift=self.modulate_shift,
-                )
-            )
-
-        # Final layer
-        layers.append(
-            ModulatedSirenLayer(
-                dim_in=self.width,
-                dim_out=self.dim_out,
-                w0=self.w0,
-                is_last=True,
-                modulate_scale=self.modulate_scale,
-                modulate_shift=self.modulate_shift,
-            )
-        )
-
-        return nn.Sequential(*layers)
-
-    def forward(self, coords):
-        """Evaluates model at a batch of coordinates.
-
-        Args:
-        coords (Array): Array of coordinates. Should have shape (height, width, 2)
-            for images and (depth/time, height, width, 3) for 3D shapes/videos.
-
-        Returns:
-        Output features at coords.
-        """
-        # Flatten coordinates
-        x = torch.reshape(coords, (-1, coords.shape[-1]))
-
-        out = self.layers(x)
-
-        return torch.reshape(out, list(coords.shape[:-1]) + [self.dim_out])
-
-
 class LatentToModulation(nn.Module):
-    """Function mapping latent vector to a set of modulations."""
+    """
+    Maps a latent vector to FiLM modulations for each modulated layer.
+
+    Output dict format:
+      {
+        layer_index: {
+          "scale": [B, width] (optional),
+          "shift": [B, width] (optional),
+        },
+        ...
+      }
+    """
 
     def __init__(
         self,
@@ -277,75 +197,65 @@ class LatentToModulation(nn.Module):
         modulate_shift: bool = True,
         activation: Callable[[Tensor], Tensor] = nn.ReLU(),
     ):
-        """Constructor.
-
+        """
         Args:
-          latent_dim: Dimension of latent vector (input of LatentToModulation
-            network).
-          layer_sizes: List of hidden layer sizes for MLP parameterizing the map
-            from latent to modulations. Input dimension is inferred from latent_dim
-            and output dimension is inferred from number of modulations.
-          width: Width of each hidden layer in MLP of function rep.
-          num_modulation_layers: Number of layers in MLP that contain modulations.
-          modulate_scale: If True, returns scale modulations.
-          modulate_shift: If True, returns shift modulations.
-          activation: Activation function to use in MLP.
+            latent_dim: Dimension of the input latent vector.
+            layer_sizes: Hidden layer sizes of the MLP; if None, use a single Linear.
+            width: Feature width per modulated layer (matches SIREN hidden width).
+            num_modulation_layers: Number of layers to modulate.
+            modulate_scale: If True, produce scale modulations.
+            modulate_shift: If True, produce shift modulations.
+            activation: Activation function for hidden layers.
         """
         super().__init__()
-        # Must modulate at least one of shift and scale
-        assert modulate_scale or modulate_shift
+        assert modulate_scale or modulate_shift, "Enable at least one of scale/shift."
 
         self.latent_dim = latent_dim
-        self.layer_sizes = layer_sizes  # counteract XM that converts to list
+        self.layer_sizes = layer_sizes
         self.width = width
         self.num_modulation_layers = num_modulation_layers
         self.modulate_scale = modulate_scale
         self.modulate_shift = modulate_shift
-        if not layer_sizes is None:
+        if layer_sizes is not None:
             self.activation = activation
 
-        # MLP outputs all modulations. We apply modulations on every hidden unit
-        # (i.e on width number of units) at every modulation layer.
-        # At each of these we apply either a scale or a shift or both,
-        # hence total output size is given by following formula
+        # Output size = (num_layers * width) * (#modulations per unit)
         self.modulations_per_unit = int(modulate_scale) + int(modulate_shift)
         self.modulations_per_layer = width * self.modulations_per_unit
         self.output_size = num_modulation_layers * self.modulations_per_layer
 
         self.layers = self._construct_layers()
 
-    def _construct_layers(self):
-        """Construct MLP layers from prescribed widths."""
-        # Handle case where layer_sizes is none: ie just have a linear layer
+    def _construct_layers(self) -> nn.Module:
+        """Construct MLP mapping latent_dim -> output_size."""
+        # Special case: No layer sizes - just create a single linear layer (recommended behaviour according to functa authors)
         if self.layer_sizes is None:
             return nn.Linear(self.latent_dim, self.output_size)
 
-        # Otherwise construct proper MLP
         all_sizes = (self.latent_dim,) + self.layer_sizes + (self.output_size,)
-
         layers = []
-
-        # Create layers by pairing consecutive sizes
         for i in range(len(all_sizes) - 1):
-            in_dim = all_sizes[i]
-            out_dim = all_sizes[i + 1]
-
-            # Add linear layer
+            in_dim, out_dim = all_sizes[i], all_sizes[i + 1]
             layers.append(nn.Linear(in_dim, out_dim))
 
-            # Add activation (except for the final layer)
             if i < len(all_sizes) - 2:
                 layers.append(self.activation)
 
         return nn.Sequential(*layers)
 
     def forward(self, latent_vector: Tensor) -> Dict[int, Dict[str, Tensor]]:
-        modulations = self.layers(latent_vector)
+        """
+        Args:
+            latent_vector: [B, latent_dim] latent codes.
 
-        outputs = {}
-        # Partition modulations into scales and shifts at every layer
+        Returns:
+            Dictionary mapping layer index to modulation dicts (scale/shift).
+        """
+        modulations = self.layers(latent_vector)  # [B, output_size]
+        outputs: Dict[int, Dict[str, Tensor]] = {}
+
         for i in range(self.num_modulation_layers):
-            single_layer_modulations = {}
+            single_layer_modulations: Dict[str, Tensor] = {}
             # Note that we add 1 to scales so that outputs of MLP will be centered
             # (since scale = 1 corresponds to identity function)
             if self.modulate_scale and self.modulate_shift:
@@ -367,10 +277,18 @@ class LatentToModulation(nn.Module):
                     ..., start : start + self.width
                 ]
             outputs[i] = single_layer_modulations
+
         return outputs
 
 
 class LatentModulatedSiren(nn.Module):
+    """
+    SIREN whose hidden layers are modulated via FiLM parameters produced from a latent.
+
+    The latent vector is mapped to per-layer FiLM scale/shift, which are then applied
+    before the sine activation in each hidden layer.
+    """
+
     def __init__(
         self,
         width: int = 256,
@@ -385,28 +303,21 @@ class LatentModulatedSiren(nn.Module):
         final_activation: Optional[Literal["sigmoid"]] = None,
         latent_init_scale: float = 0.01,
         use_meta_sgd: bool = False,
-        device: Optional[torch.device] = None,
     ):
-        """Constructor.
-
+        """
         Args:
-          width (int): Width of each hidden layer in MLP.
-          depth (int): Number of layers in MLP.
-          dim_in (int): Number of input channels
-          dim_out (int): Number of output channels.
-          latent_dim: Dimension of latent vector (input of LatentToModulation
-            network).
-          layer_sizes: List of hidden layer sizes for MLP parameterizing the map
-            from latent to modulations. Input dimension is inferred from latent_dim
-            and output dimension is inferred from number of modulations.
-          w0 (float): Scale factor in sine activation in first layer.
-          modulate_scale: If True, modulates scales.
-          modulate_shift: If True, modulates shifts.
-          latent_init_scale: Scale at which to randomly initialize latent vector.
-          use_meta_sgd: Whether to use meta-SGD.
-          meta_sgd_init_range: Range from which initial meta_sgd learning rates will
-            be uniformly sampled.
-          meta_sgd_clip_range: Range at which to clip learning rates.
+            width: Hidden layer width.
+            depth: Number of layers.
+            dim_in: Coordinate dimension (e.g., 2 for 2D images).
+            dim_out: Output channels (e.g., 3 for RGB).
+            latent_dim: Dimension of latent code.
+            layer_sizes: Hidden sizes for the latent-to-modulation MLP; None => single Linear.
+            w0: SIREN omega_0.
+            modulate_scale: Whether to learn scale modulations.
+            modulate_shift: Whether to learn shift modulations.
+            final_activation: Optional "sigmoid" on the final output.
+            latent_init_scale: Typical scale for initializing latents (used externally).
+            use_meta_sgd: If True, create learnable per-latent LR container.
         """
         super().__init__()
         self.width = width
@@ -423,7 +334,7 @@ class LatentModulatedSiren(nn.Module):
 
         # Parse final activation
         if final_activation is None:
-            self.final_activation = None
+            self.final_activation: Optional[nn.Module] = None
         elif final_activation == "sigmoid":
             self.final_activation = nn.Sigmoid()
         else:
@@ -434,9 +345,10 @@ class LatentModulatedSiren(nn.Module):
         if self.use_meta_sgd:
             self.meta_sgd_lrs = MetaSGDLrs(latent_dim)
 
-        # Initialise Sine activations
+        # Sine activation used after applying FiLM in hidden layers
         self.sinew0 = Sine(w0)
 
+        # Map latent -> per-layer FiLM parameters
         self.latent_to_modulation = LatentToModulation(
             latent_dim=latent_dim,
             layer_sizes=layer_sizes,
@@ -446,15 +358,14 @@ class LatentModulatedSiren(nn.Module):
             modulate_shift=modulate_shift,
         )
 
-        # Obtain layers
+        # Backbone layers (modulation and activation are applied externally)
         self.layers = self._construct_layers()
 
-    def _construct_layers(self):
+    def _construct_layers(self) -> nn.ModuleList:
+        """
+        Build the SIREN layers with modulation/activation disabled internally.
+        """
         layers = []
-
-        # Note all modulations are set to False here, since we apply modulations
-        # from latent_to_modulations output. Similarly, activations are set to false
-        # so that modulations can be applied prior to activation
         # First layer
         layers.append(
             ModulatedSirenLayer(
@@ -496,49 +407,67 @@ class LatentModulatedSiren(nn.Module):
 
         return nn.ModuleList(layers)
 
-    def forward(
-        self, coords: Tensor, latent: Tensor  # [B, N_points, dim_in]  # [B, latent_dim]
-    ) -> Tensor:
-        B = coords.shape[0]
+    def forward(self, coords: Tensor, latent: Tensor) -> Tensor:
+        """
+        Evaluate the latent-modulated SIREN.
 
-        # Check correct dimensionality
-        assert latent.shape[0] == B
-        assert coords.shape[-1] == self.dim_in
+        Args:
+            coords: [B, N, dim_in] coordinate samples per batch.
+            latent: [B, latent_dim] latent codes (one per batch item).
+
+        Returns:
+            [B, N, dim_out] predictions at coords.
+        """
+        B = coords.shape[0]
+        # Sanity checks
+        assert latent.shape[0] == B, "Batch size mismatch between coords and latent."
+        assert coords.shape[-1] == self.dim_in, "Coordinate dimension mismatch."
 
         # 1) compute all FiLM modulations: Dict[layer_idx] -> {"scale": [B, C], "shift": [B, C]}
         mods = self.latent_to_modulation(latent)
 
-        # Pass through
+        # 2) Forward through all but final layer, applying FiLM then Sine
         x = coords
         for i, layer in enumerate(self.layers[:-1]):
             x = layer(x)
 
             m = mods[i]
             if "scale" in m:
-                x = x * m["scale"].unsqueeze(1)  # [B,1,C] -> broadcast over N
+                x = x * m["scale"].unsqueeze(1)  # [B, 1, C] -> broadcast across N
             if "shift" in m:
                 x = x + m["shift"].unsqueeze(1)
-
-            # sine activation
             x = self.sinew0(x)
 
-        # 4) final linear (+ optional activation)
+        # 3) Final linear (optionally followed by final activation)
         x = self.layers[-1](x)  # [B, N, dim_out]
         if self.final_activation is not None:
             x = self.final_activation(x)
 
         return x
 
-    # def reconstruct_image(self, sampling_grid, latent_vector):
-
-    #     x_in = einops.rearrange(sampling_grid, "h w c -> (h w) c")  # HWxDim_in
-    #     x_out = self.forward(x_in, latent_vector)  # HWxDim_out
-    #     x_out = torch.reshape(x_out, list(sampling_grid.shape[:-1]) + [self.dim_out])
+    # def reconstruct_image(self, sampling_grid, latent_vectors):
+    #     B, H, W, C = sampling_grid.shape
+    #     x_in = einops.rearrange(sampling_grid, "b h w c -> b (h w) c")  # HWxDim_in
+    #     x_out = self.forward(x_in, latent_vectors)  # HWxDim_out
+    #     x_out = torch.reshape(x_out, [B, H, W, self.dim_out])
     #     return x_out
 
-    def reconstruct_image(self, sampling_grid, latent_vectors):
-        B, H, W, C = sampling_grid.shape
-        x_in = einops.rearrange(sampling_grid, "b h w c -> b (h w) c")  # HWxDim_in
-        x_out = self.forward(x_in, latent_vectors)  # HWxDim_out
-        x_out = torch.reshape(x_out, [B, H, W, self.dim_out])
+    def reconstruct_image(self, sampling_grid: Tensor, latent_vectors: Tensor) -> Tensor:
+        """
+        Reconstruct predictions for a dense coordinate grid.
+
+        Args:
+            sampling_grid: [B, *spatial, dim_in] coordinate grid.
+            latent_vectors: [B, latent_dim] latent codes.
+
+        Returns:
+            [B, *spatial, dim_out] predictions reshaped to the grid.
+        """
+        B = sampling_grid.shape[0]
+        spatial_shape = sampling_grid.shape[1:-1]
+        # Flatten all spatial axes -> [B, N, dim_in]
+        x_in = einops.rearrange(sampling_grid, "b ... c -> b (...) c")
+        # Forward and reshape back
+        x_out = self.forward(x_in, latent_vectors)  # [B, N, dim_out]
+        x_out = x_out.reshape(B, *spatial_shape, self.dim_out)
         return x_out
