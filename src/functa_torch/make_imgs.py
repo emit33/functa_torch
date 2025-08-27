@@ -6,7 +6,9 @@ from functa_torch.utils.nonpublic import (
 )
 
 
-def visualise_experiments_from_indices(experiment_inds: Union[int, Iterable]):
+def visualise_experiments_from_indices(
+    experiment_inds: Union[int, Iterable], resolution
+):
     if isinstance(experiment_inds, int):
         experiment_inds = [experiment_inds]
 
@@ -17,6 +19,7 @@ def visualise_experiments_from_indices(experiment_inds: Union[int, Iterable]):
             visualise_combined(
                 config.paths.checkpoints_dir,
                 config.paths.figs_dir / (config.experiment_name + "_imgs.png"),
+                resolution,
             )
 
         except (FileNotFoundError, RuntimeError) as e:
@@ -25,6 +28,7 @@ def visualise_experiments_from_indices(experiment_inds: Union[int, Iterable]):
 
 
 if __name__ == "__main__":
-    experiment_numbers: Union[int, Iterable] = range(118, 119)
+    experiment_numbers: Union[int, Iterable] = range(93, 111)
+    resolution = (64, 64)
 
-    visualise_experiments_from_indices(experiment_numbers)
+    visualise_experiments_from_indices(experiment_numbers, resolution)

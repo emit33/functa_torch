@@ -1,4 +1,5 @@
 """SIREN layers and latent-modulated SIREN model with FiLM-based modulations."""
+
 from typing import Callable, Dict, Literal, Optional, Tuple
 import einops
 import torch
@@ -303,6 +304,7 @@ class LatentModulatedSiren(nn.Module):
         final_activation: Optional[Literal["sigmoid"]] = None,
         latent_init_scale: float = 0.01,
         use_meta_sgd: bool = False,
+        device: str = "cuda",
     ):
         """
         Args:
@@ -452,7 +454,9 @@ class LatentModulatedSiren(nn.Module):
     #     x_out = torch.reshape(x_out, [B, H, W, self.dim_out])
     #     return x_out
 
-    def reconstruct_image(self, sampling_grid: Tensor, latent_vectors: Tensor) -> Tensor:
+    def reconstruct_image(
+        self, sampling_grid: Tensor, latent_vectors: Tensor
+    ) -> Tensor:
         """
         Reconstruct predictions for a dense coordinate grid.
 

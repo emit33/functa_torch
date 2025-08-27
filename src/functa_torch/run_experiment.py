@@ -28,16 +28,9 @@ def run_experiment(experiment_ind):
 
     trainer.train()
 
-    # Create visualisations
-    if config.paths.figs_dir is not None:
-        visualise_combined(
-            config.paths.checkpoints_dir,
-            config.paths.figs_dir / (config.experiment_name + "_imgs.png"),
-        )
-
     wandb.finish()
 
 
 if __name__ == "__main__":
-    experiment_number = 90
+    experiment_number = 133
     run_experiment(experiment_number)
