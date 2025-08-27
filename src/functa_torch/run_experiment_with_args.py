@@ -1,18 +1,22 @@
+"""Run a functa training experiment from a YAML config file."""
+
 import dataclasses
 import os
 import shutil
 import argparse
-
+from pathlib import Path
 import wandb
 
-from functa_torch.utils.analysis import visualise_combined
 from functa_torch.utils.config import Config
 from functa_torch.utils.training import latentModulatedTrainer
 
 
-def main():
+def main() -> None:
+    """Parse config path, initialize Weights & Biases, and run training."""
     # Obtain config path
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Run functa training from a YAML config file."
+    )
     parser.add_argument(
         "-c",
         "--config",
@@ -23,11 +27,17 @@ def main():
     )
     args = parser.parse_args()
 
-    # Obtain config
-    config = Config.from_yaml(args.config_path)
+    cfg_path = Path(args.config_path)
+    if not cfg_path.is_file():
+        raise FileNotFoundError(f"Config file not found: {cfg_path}")
 
-    if os.path.exists(config.paths.checkpoints_dir):
-        shutil.rmtree(config.paths.checkpoints_dir)
+    # Obtain config
+    config = Config.from_yaml(cfg_path)
+
+    # Clear checkpoints dir if it exists
+    ckpt_dir = config.paths.checkpoints_dir
+    if Path(ckpt_dir).exists():
+        shutil.rmtree(ckpt_dir)
 
     run_name = f"{config.experiment_name}_job{os.environ.get('SLURM_JOB_ID','local')}"
     wandb.init(
@@ -41,13 +51,6 @@ def main():
     ).to(config.model.device)
 
     trainer.train()
-
-    # Create visualisations
-    if config.paths.figs_dir is not None:
-        visualise_combined(
-            config.paths.checkpoints_dir,
-            config.paths.figs_dir / (config.experiment_name + "_imgs.png"),
-        )
 
     wandb.finish()
 
