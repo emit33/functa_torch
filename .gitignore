@@ -194,12 +194,6 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-# Further ignroes
-testing.*
-checkpoints/*
-triangles/*
-checkpoints*
-data
-experiments*
+# Further ignores
 *.egg-info/
 wandb
